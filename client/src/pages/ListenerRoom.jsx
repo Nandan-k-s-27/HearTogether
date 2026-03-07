@@ -1,0 +1,194 @@
+import { useEffect, useState, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import socket from '../services/socket';
+import { useListenerWebRTC } from '../hooks/useWebRTC';
+import { GlowCard } from '../components/ui/spotlight-card';
+import { ShimmerButton } from '../components/ui/shimmer-button';
+
+export default function ListenerRoom() {
+  const { roomId: roomCode } = useParams(); // roomId here is actually the room code
+  const navigate = useNavigate();
+
+  const [status, setStatus] = useState('connecting'); // connecting | listening | paused | ended
+  const [volume, setVolume] = useState(1);
+  const [syncOffset, setSyncOffset] = useState(0);
+  const { handleOffer, handleIceCandidate, close, audioRef } = useListenerWebRTC(socket);
+  const audioElRef = useRef(null);
+
+  // Connect & join room
+  useEffect(() => {
+    if (!socket.connected) socket.connect();
+
+    socket.emit('listener:join', { roomCode }, (res) => {
+      if (res?.error) {
+        alert(res.error);
+        navigate('/');
+        return;
+      }
+      setStatus('listening');
+    });
+
+    return () => {
+      close();
+      socket.disconnect();
+    };
+  }, [roomCode, navigate, close]);
+
+  // Signaling events
+  useEffect(() => {
+    const onOffer = ({ from, offer }) => {
+      handleOffer(from, offer);
+      setStatus('listening');
+    };
+
+    const onIce = ({ from, candidate }) => handleIceCandidate(from, candidate);
+
+    const onPaused = () => setStatus('paused');
+    const onResumed = () => setStatus('listening');
+    const onStopped = () => {
+      setStatus('ended');
+      close();
+    };
+    const onRemoved = () => {
+      setStatus('ended');
+      close();
+    };
+
+    // Sync correction
+    const onSync = ({ timestamp, serverTime }) => {
+      const now = Date.now();
+      const offset = now - serverTime;
+      setSyncOffset(offset);
+    };
+
+    socket.on('signal:offer', onOffer);
+    socket.on('signal:ice-candidate', onIce);
+    socket.on('host:paused', onPaused);
+    socket.on('host:resumed', onResumed);
+    socket.on('host:stopped', onStopped);
+    socket.on('host:removed', onRemoved);
+    socket.on('sync:timestamp', onSync);
+
+    return () => {
+      socket.off('signal:offer', onOffer);
+      socket.off('signal:ice-candidate', onIce);
+      socket.off('host:paused', onPaused);
+      socket.off('host:resumed', onResumed);
+      socket.off('host:stopped', onStopped);
+      socket.off('host:removed', onRemoved);
+      socket.off('sync:timestamp', onSync);
+    };
+  }, [handleOffer, handleIceCandidate, close]);
+
+  // Volume control
+  useEffect(() => {
+    if (audioElRef.current) {
+      audioElRef.current.volume = volume;
+    }
+  }, [volume]);
+
+  // Assign ref
+  const setAudioEl = (el) => {
+    audioElRef.current = el;
+    audioRef.current = el;
+  };
+
+  const handleLeave = () => {
+    close();
+    socket.disconnect();
+    navigate('/');
+  };
+
+  const statusConfig = {
+    connecting: { color: 'text-yellow-400', icon: '⏳', label: 'Connecting…' },
+    listening: { color: 'text-green-400', icon: '🎵', label: 'Listening' },
+    paused: { color: 'text-yellow-400', icon: '⏸️', label: 'Paused by Host' },
+    ended: { color: 'text-red-400', icon: '⏹️', label: 'Session Ended' },
+  };
+
+  const s = statusConfig[status];
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center px-6">
+      <GlowCard customSize glowColor="blue" className="w-full max-w-md text-center">
+        <h1 className="mb-6 text-2xl font-bold">🎧 HearTogether</h1>
+
+        {/* Status */}
+        <div className="mb-6">
+          <div className="text-5xl mb-2">{s.icon}</div>
+          <p className={`text-lg font-semibold ${s.color}`}>{s.label}</p>
+          <p className="mt-1 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
+        </div>
+
+        {/* Audio element */}
+        <audio ref={setAudioEl} autoPlay playsInline />
+
+        {/* Volume */}
+        {status !== 'ended' && (
+          <div className="mb-6">
+            <label className="mb-2 block text-sm text-gray-400">Volume</label>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={volume}
+              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              className="w-full accent-brand-500"
+            />
+            <p className="mt-1 text-xs text-gray-500">{Math.round(volume * 100)}%</p>
+          </div>
+        )}
+
+        {/* Sync indicator */}
+        {status === 'listening' && (
+          <div className="mb-6 flex items-center justify-center gap-2 text-sm text-gray-400">
+            <span className="h-2 w-2 rounded-full bg-green-500" />
+            Sync offset: {syncOffset}ms
+          </div>
+        )}
+
+        {/* Connection quality visual */}
+        {status === 'listening' && (
+          <div className="mb-6 flex items-center justify-center gap-1">
+            {[...Array(4)].map((_, i) => (
+              <div
+                key={i}
+                className={`w-2 rounded-sm ${
+                  i < (Math.abs(syncOffset) < 100 ? 4 : Math.abs(syncOffset) < 300 ? 3 : 2)
+                    ? 'bg-green-500'
+                    : 'bg-gray-700'
+                }`}
+                style={{ height: `${(i + 1) * 6}px` }}
+              />
+            ))}
+            <span className="ml-2 text-xs text-gray-500">Connection</span>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex flex-col gap-3">
+          {status === 'ended' ? (
+            <ShimmerButton
+              onClick={() => navigate('/')}
+              background="rgba(76, 110, 245, 1)"
+              shimmerColor="#ffffff"
+              className="dark:text-white w-full font-semibold"
+            >
+              Back to Home
+            </ShimmerButton>
+          ) : (
+            <ShimmerButton
+              onClick={handleLeave}
+              background="rgba(20, 20, 30, 0.95)"
+              shimmerColor="#5c7cfa"
+              className="dark:text-white w-full font-semibold"
+            >
+              Leave Room
+            </ShimmerButton>
+          )}
+        </div>
+      </GlowCard>
+    </div>
+  );
+}

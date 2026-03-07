@@ -1,0 +1,178 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const { createRoom, getRoom, deleteRoom, addListener, removeListener, getRoomByCode, getAllRooms } = require('./rooms');
+
+const app = express();
+const server = http.createServer(app);
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+const io = new Server(server, {
+  cors: {
+    origin: FRONTEND_URL,
+    methods: ['GET', 'POST'],
+  },
+});
+
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(cors({ origin: FRONTEND_URL }));
+app.use(express.json({ limit: '10kb' }));
+
+const createRoomLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many rooms created. Please try again later.' },
+});
+
+// Stale room cleanup: remove rooms older than 6 h with no active host
+const SIX_HOURS = 6 * 60 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const room of getAllRooms()) {
+    if (!room.hostConnected && now - room.createdAt > SIX_HOURS) {
+      deleteRoom(room.id);
+      console.log(`[cleanup] stale room ${room.code} removed`);
+    }
+  }
+}, 60 * 60 * 1000); // run every hour
+
+// Health check
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// REST: create room
+app.post('/api/rooms', createRoomLimiter, (_req, res) => {
+  const room = createRoom();
+  res.status(201).json(room);
+});
+
+// REST: get room info
+app.get('/api/rooms/:code', (req, res) => {
+  const code = req.params.code.replace(/[^A-Za-z0-9]/g, '').slice(0, 20).toUpperCase();
+  const room = getRoomByCode(code);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  res.json({ id: room.id, code: room.code, hostConnected: room.hostConnected, listenerCount: room.listeners.size });
+});
+
+// ─── Socket.IO signaling ───────────────────────────────────────────────
+io.on('connection', (socket) => {
+  console.log(`[socket] connected: ${socket.id}`);
+
+  // Host joins room
+  socket.on('host:join', ({ roomId }, cb) => {
+    const room = getRoom(roomId);
+    if (!room) return cb?.({ error: 'Room not found' });
+    room.hostSocketId = socket.id;
+    room.hostConnected = true;
+    socket.join(roomId);
+    socket.data.role = 'host';
+    socket.data.roomId = roomId;
+    cb?.({ ok: true, code: room.code });
+    console.log(`[room ${room.code}] host joined`);
+  });
+
+  // Listener joins room
+  socket.on('listener:join', ({ roomCode }, cb) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return cb?.({ error: 'Room not found' });
+    if (!room.hostConnected) return cb?.({ error: 'Host not connected' });
+
+    addListener(room.id, socket.id);
+    socket.join(room.id);
+    socket.data.role = 'listener';
+    socket.data.roomId = room.id;
+
+    cb?.({ ok: true, roomId: room.id });
+
+    // Notify host about new listener
+    io.to(room.hostSocketId).emit('listener:joined', {
+      listenerId: socket.id,
+      listenerCount: room.listeners.size,
+    });
+
+    console.log(`[room ${room.code}] listener ${socket.id} joined (${room.listeners.size} total)`);
+  });
+
+  // ─── WebRTC signaling ─────────────────────────────────────────
+  socket.on('signal:offer', ({ to, offer }) => {
+    io.to(to).emit('signal:offer', { from: socket.id, offer });
+  });
+
+  socket.on('signal:answer', ({ to, answer }) => {
+    io.to(to).emit('signal:answer', { from: socket.id, answer });
+  });
+
+  socket.on('signal:ice-candidate', ({ to, candidate }) => {
+    io.to(to).emit('signal:ice-candidate', { from: socket.id, candidate });
+  });
+
+  // ─── Host controls ────────────────────────────────────────────
+  socket.on('host:pause', () => {
+    const { roomId } = socket.data;
+    if (roomId) socket.to(roomId).emit('host:paused');
+  });
+
+  socket.on('host:resume', () => {
+    const { roomId } = socket.data;
+    if (roomId) socket.to(roomId).emit('host:resumed');
+  });
+
+  socket.on('host:stop', () => {
+    const { roomId } = socket.data;
+    if (roomId) {
+      socket.to(roomId).emit('host:stopped');
+      deleteRoom(roomId);
+    }
+  });
+
+  socket.on('host:remove-listener', ({ listenerId }) => {
+    const { roomId } = socket.data;
+    if (!roomId) return;
+    const room = getRoom(roomId);
+    if (room) removeListener(room.id, listenerId);
+    io.to(listenerId).emit('host:removed');
+    const listenerSocket = io.sockets.sockets.get(listenerId);
+    if (listenerSocket) listenerSocket.leave(roomId);
+  });
+
+  // ─── Sync: host broadcasts its timestamp periodically ─────────
+  socket.on('sync:timestamp', ({ timestamp }) => {
+    const { roomId } = socket.data;
+    if (roomId) socket.to(roomId).emit('sync:timestamp', { timestamp, serverTime: Date.now() });
+  });
+
+  // ─── Disconnect ───────────────────────────────────────────────
+  socket.on('disconnect', () => {
+    const { role, roomId } = socket.data;
+    if (!roomId) return;
+    const room = getRoom(roomId);
+    if (!room) return;
+
+    if (role === 'host') {
+      io.to(roomId).emit('host:stopped');
+      deleteRoom(roomId);
+      console.log(`[room ${room.code}] host disconnected – room closed`);
+    } else if (role === 'listener') {
+      removeListener(room.id, socket.id);
+      if (room.hostSocketId) {
+        io.to(room.hostSocketId).emit('listener:left', {
+          listenerId: socket.id,
+          listenerCount: room.listeners.size,
+        });
+      }
+      console.log(`[room ${room.code}] listener ${socket.id} left (${room.listeners.size} remaining)`);
+    }
+  });
+});
+
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+  console.log(`HearTogether server listening on port ${PORT}`);
+});

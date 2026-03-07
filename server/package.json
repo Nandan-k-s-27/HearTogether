@@ -1,0 +1,21 @@
+{
+  "name": "heartogether-server",
+  "version": "1.0.0",
+  "description": "HearTogether signaling and room management server",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.3.0",
+    "helmet": "^8.1.0",
+    "nanoid": "^3.3.7",
+    "socket.io": "^4.7.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
