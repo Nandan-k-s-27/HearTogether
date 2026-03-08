@@ -83,9 +83,10 @@ export default function HostRoom() {
 
   // handleStop — uses streamRef so it is never stale inside media-track callbacks.
   const handleStop = useCallback(() => {
-    // Remove track listeners first to prevent the 'ended' handler from re-firing.
-    streamRef.current?.getAudioTracks().forEach((t) => { t.onended = null; });
-    // Stop every remaining track (this closes the browser's "Sharing" indicator).
+    // Clear all track listeners first to prevent any 'ended' handler re-firing.
+    streamRef.current?.getTracks().forEach((t) => { t.onended = null; });
+    // Stop every track — this closes the browser's sharing indicator on ALL
+    // captured tabs/screens, including any still-live video tracks.
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setStream(null);
@@ -111,7 +112,17 @@ export default function HostRoom() {
       if (type === 'mic') {
         mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       } else {
-        // getDisplayMedia — video is required by the API but we discard it.
+        // getDisplayMedia — video is required by the API.
+        // We do NOT stop video tracks here.  Stopping them early causes two problems:
+        //  1. Chrome's "You are sharing [Tab X]" indicator may not close when the
+        //     host later clicks Stop, because the browser considers video as the
+        //     primary capture.  Stopping all tracks together in handleStop gives
+        //     Chrome a clean single signal to close the entire capture session.
+        //  2. On some Chrome builds, stopping a getDisplayMedia video track fires
+        //     the track's 'ended' event on sibling audio tracks, triggering
+        //     handleStop prematurely.
+        // Video is never added to WebRTC peer connections (only audio is), so
+        // keeping it alive here costs only a little CPU for an unused capture.
         mediaStream = await navigator.mediaDevices.getDisplayMedia({
           video: true,
           audio: {
@@ -121,16 +132,15 @@ export default function HostRoom() {
           },
           preferCurrentTab: type === 'tab',
         });
-        // Stop video tracks immediately — we only stream audio.
-        // IMPORTANT: do NOT attach onended to these video tracks; stopping them
-        // programmatically here would fire onended right away.
-        mediaStream.getVideoTracks().forEach((t) => t.stop());
       }
 
-      // Detect when the user stops sharing via the browser's own "Stop sharing"
-      // button. We watch the audio tracks because those are the ones we keep alive.
-      // Using handleStopRef so the callback always calls the latest handleStop.
-      mediaStream.getAudioTracks().forEach((track) => {
+      // Wire onended to EVERY track so that:
+      //  - clicking HearTogether's Stop button → handleStop() (via button handler)
+      //  - clicking the browser's own "Stop sharing" button → onended fires on
+      //    whichever track Chrome ends first → handleStop() is called
+      // handleStop() clears all listeners before stopping tracks, preventing
+      // a cascade of multiple handleStop() calls.
+      mediaStream.getTracks().forEach((track) => {
         track.onended = () => handleStopRef.current?.();
       });
 

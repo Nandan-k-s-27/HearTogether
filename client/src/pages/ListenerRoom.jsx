@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import socket from '../services/socket';
 import { useListenerWebRTC } from '../hooks/useWebRTC';
@@ -12,12 +12,51 @@ export default function ListenerRoom() {
   const [status, setStatus] = useState('connecting'); // connecting | listening | paused | ended
   const [volume, setVolume] = useState(1);
   const [syncOffset, setSyncOffset] = useState(0);
-  // True when the browser's autoplay policy blocked audio (common on mobile).
-  const [needsGesture, setNeedsGesture] = useState(false);
-  const { handleOffer, handleIceCandidate, close, audioRef } = useListenerWebRTC(socket, {
-    onNeedsGesture: () => setNeedsGesture(true),
+  // audioReady  → remote stream has arrived, waiting for user tap to play
+  // audioPlaying → audio.play() succeeded, currently streaming
+  const [audioReady, setAudioReady] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+
+  const { handleOffer, handleIceCandidate, close, audioRef, remoteStreamRef } = useListenerWebRTC(socket, {
+    onTrackReady: () => setAudioReady(true),
   });
   const audioElRef = useRef(null);
+
+  // Stable callback ref — using useCallback avoids React's detach-reattach
+  // cycle on every re-render, which would briefly set audioRef.current = null
+  // and miss an ontrack event arriving in that window.
+  const setAudioEl = useCallback((el) => {
+    audioElRef.current = el;
+    audioRef.current = el;
+    // If the stream arrived before the element mounted, attach it now.
+    if (el && remoteStreamRef.current && !el.srcObject) {
+      el.srcObject = remoteStreamRef.current;
+      el.muted = false;
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Called by the "Tap to Hear" button — runs inside a real user-gesture context
+  // so audio.play() is guaranteed to succeed on all mobile browsers.
+  const handleStartAudio = useCallback(() => {
+    const audio = audioElRef.current;
+    if (!audio) return;
+    // Safety net: wire up srcObject if ontrack fired while element was unmounted.
+    if (!audio.srcObject && remoteStreamRef.current) {
+      audio.srcObject = remoteStreamRef.current;
+    }
+    audio.muted = false;
+    audio.volume = volume;
+    audio
+      .play()
+      .then(() => {
+        setAudioReady(false);
+        setAudioPlaying(true);
+      })
+      .catch((err) => {
+        // Should never reach here inside a gesture handler, but log just in case.
+        console.error('[HearTogether] play() failed:', err.name, err.message);
+      });
+  }, [volume, remoteStreamRef]);
 
   // Connect & join room
   useEffect(() => {
@@ -84,19 +123,6 @@ export default function ListenerRoom() {
     };
   }, [handleOffer, handleIceCandidate, close]);
 
-  // Volume control
-  useEffect(() => {
-    if (audioElRef.current) {
-      audioElRef.current.volume = volume;
-    }
-  }, [volume]);
-
-  // Assign ref
-  const setAudioEl = (el) => {
-    audioElRef.current = el;
-    audioRef.current = el;
-  };
-
   const handleLeave = () => {
     close();
     socket.disconnect();
@@ -124,23 +150,23 @@ export default function ListenerRoom() {
           <p className="mt-1 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
         </div>
 
-        {/* Audio element — hidden, playback managed via srcObject */}
-        <audio ref={setAudioEl} autoPlay playsInline />
+        {/* Hidden audio element — playback triggered by user tap, not autoplay */}
+        <audio ref={setAudioEl} playsInline muted />
 
-        {/* Mobile autoplay unlock button */}
-        {needsGesture && (
+        {/* ── "Tap to play" button ──────────────────────────────────────────
+            Shown as soon as the remote stream arrives.
+            Must be a real tap/click so mobile browsers allow audio.play().   */}
+        {audioReady && !audioPlaying && (
           <button
-            onClick={() => {
-              audioElRef.current?.play().then(() => setNeedsGesture(false)).catch(() => {});
-            }}
-            className="mb-6 w-full rounded-xl bg-brand-500 py-3 text-lg font-semibold text-white animate-pulse hover:animate-none hover:bg-brand-600 transition"
+            onClick={handleStartAudio}
+            className="mb-6 w-full rounded-xl bg-brand-500 py-4 text-lg font-bold text-white shadow-lg animate-pulse hover:animate-none hover:bg-brand-600 active:scale-95 transition-transform"
           >
             🔊 Tap to Hear Audio
           </button>
         )}
 
-        {/* Volume */}
-        {status !== 'ended' && (
+        {/* Volume — only shown once playback has actually started */}
+        {audioPlaying && status !== 'ended' && (
           <div className="mb-6">
             <label className="mb-2 block text-sm text-gray-400">Volume</label>
             <input
@@ -149,7 +175,11 @@ export default function ListenerRoom() {
               max="1"
               step="0.01"
               value={volume}
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                setVolume(v);
+                if (audioElRef.current) audioElRef.current.volume = v;
+              }}
               className="w-full accent-brand-500"
             />
             <p className="mt-1 text-xs text-gray-500">{Math.round(volume * 100)}%</p>

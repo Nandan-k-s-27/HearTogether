@@ -65,14 +65,19 @@ export function useHostWebRTC(socket, stream) {
 
 /**
  * Hook for the LISTENER side: receives audio from host.
+ *
+ * onTrackReady() is called as soon as a remote audio stream arrives, so the
+ * UI can show a "Tap to play" button.  We never attempt autoplay ourselves —
+ * all mobile browsers require an explicit user gesture before audio can play,
+ * and relying on error-detection misses several browser-specific error codes.
  */
-export function useListenerWebRTC(socket, { onNeedsGesture } = {}) {
+export function useListenerWebRTC(socket, { onTrackReady } = {}) {
   const pcRef = useRef(null);
   const remoteStreamRef = useRef(null);
   const audioRef = useRef(null);
-  // Keep the latest callback in a ref so the ontrack closure is never stale.
-  const onNeedsGestureRef = useRef(onNeedsGesture);
-  useEffect(() => { onNeedsGestureRef.current = onNeedsGesture; }, [onNeedsGesture]);
+  // Ref-wrap the callback so the ontrack closure never holds a stale value.
+  const onTrackReadyRef = useRef(onTrackReady);
+  useEffect(() => { onTrackReadyRef.current = onTrackReady; }, [onTrackReady]);
 
   const handleOffer = useCallback(
     async (hostId, offer) => {
@@ -86,19 +91,24 @@ export function useListenerWebRTC(socket, { onNeedsGesture } = {}) {
       };
 
       pc.ontrack = (e) => {
-        remoteStreamRef.current = e.streams[0];
+        // Some mobile browsers fire ontrack before streams[] is populated —
+        // fall back to constructing a stream directly from the track.
+        const stream = (e.streams && e.streams.length > 0)
+          ? e.streams[0]
+          : new MediaStream([e.track]);
+
+        remoteStreamRef.current = stream;
+
+        // Prime the audio element if it is already in the DOM.
         if (audioRef.current) {
-          audioRef.current.srcObject = e.streams[0];
-          // Mobile browsers (Android Chrome, iOS Safari) block autoplay for
-          // events that are not directly triggered by a user gesture. We try
-          // to play, and if it is blocked we surface a callback so the UI can
-          // show a "Tap to hear" button.
-          audioRef.current.play().catch((err) => {
-            if (err.name === 'NotAllowedError' || err.name === 'NotSupportedError') {
-              onNeedsGestureRef.current?.();
-            }
-          });
+          audioRef.current.srcObject = stream;
+          audioRef.current.muted = false;
         }
+
+        // Tell the UI the stream is ready.  The UI will show a "Tap to play"
+        // button; the user's tap calls audio.play() inside a gesture context,
+        // which is the only reliable way to start audio on mobile.
+        onTrackReadyRef.current?.();
       };
 
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
