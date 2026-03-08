@@ -44,7 +44,17 @@ cd client
 npm run build   # outputs to client/dist/
 ```
 
-Serve `client/dist/` with any static host (Vercel, Netlify, Nginx). Point `FRONTEND_URL` on the server to the deployed frontend origin.
+### Deploying to Vercel + a Node host (e.g., Render / Railway)
+
+**Frontend (Vercel):**
+1. Set the **Root Directory** to `client/` in your Vercel project settings.
+2. Add the environment variable `VITE_SERVER_URL=https://your-server.onrender.com` (no trailing slash).
+3. The included `client/vercel.json` already configures the SPA rewrites so deep links (QR codes, room links) work correctly.
+
+**Backend (Render / Railway / Fly.io …):**
+1. Deploy the `server/` directory.
+2. Set `FRONTEND_URL=https://your-heartogether.vercel.app` (no trailing slash) in the server's environment variables.
+3. Set `PORT` to whatever the host assigns (or leave it to the host to inject).
 
 ## How It Works
 

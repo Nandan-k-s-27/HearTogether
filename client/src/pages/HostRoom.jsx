@@ -24,6 +24,11 @@ export default function HostRoom() {
 
   const { createOffer, handleAnswer, handleIceCandidate, removePeer, closeAll } = useHostWebRTC(socket, stream);
   const syncInterval = useRef(null);
+  // streamRef always holds the current stream — safe to use inside async callbacks
+  // without worrying about stale closures over the `stream` state variable.
+  const streamRef = useRef(null);
+  // handleStopRef ensures track 'ended' listeners always invoke the latest handleStop.
+  const handleStopRef = useRef(null);
 
   // Connect socket & join room
   useEffect(() => {
@@ -76,37 +81,60 @@ export default function HostRoom() {
     };
   }, [stream, createOffer, handleAnswer, handleIceCandidate, removePeer]);
 
-      // Start capturing audio
+  // handleStop — uses streamRef so it is never stale inside media-track callbacks.
+  const handleStop = useCallback(() => {
+    // Remove track listeners first to prevent the 'ended' handler from re-firing.
+    streamRef.current?.getAudioTracks().forEach((t) => { t.onended = null; });
+    // Stop every remaining track (this closes the browser's "Sharing" indicator).
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setStream(null);
+    setStreaming(false);
+    setPaused(false);
+    closeAll();
+    if (syncInterval.current) {
+      clearInterval(syncInterval.current);
+      syncInterval.current = null;
+    }
+    socket.emit('host:stop');
+    navigate('/');
+  }, [navigate, closeAll]);
+
+  // Keep the ref pointing at the latest handleStop so capture-time listeners
+  // don't hold a stale closure.
+  handleStopRef.current = handleStop;
+
+  // Start capturing audio
   const startCapture = useCallback(async (type) => {
     try {
       let mediaStream;
       if (type === 'mic') {
         mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       } else {
-        // getDisplayMedia with audio for tab/screen capture
+        // getDisplayMedia — video is required by the API but we discard it.
         mediaStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true, // required but we only use audio
+          video: true,
           audio: {
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false,
           },
-          systemAudio: 'include',
           preferCurrentTab: type === 'tab',
         });
-        
-        // Handle when user clicks "Stop sharing" in the browser's own UI
-        mediaStream.getVideoTracks().forEach((track) => {
-          track.onended = () => {
-             // If we are still streaming, it means the user clicked browser's stop share button
-             handleStop(); 
-          };
-        });
-
-        // Remove video tracks — we only need audio
+        // Stop video tracks immediately — we only stream audio.
+        // IMPORTANT: do NOT attach onended to these video tracks; stopping them
+        // programmatically here would fire onended right away.
         mediaStream.getVideoTracks().forEach((t) => t.stop());
       }
 
+      // Detect when the user stops sharing via the browser's own "Stop sharing"
+      // button. We watch the audio tracks because those are the ones we keep alive.
+      // Using handleStopRef so the callback always calls the latest handleStop.
+      mediaStream.getAudioTracks().forEach((track) => {
+        track.onended = () => handleStopRef.current?.();
+      });
+
+      streamRef.current = mediaStream;
       setStream(mediaStream);
       setStreaming(true);
       setPaused(false);
@@ -118,25 +146,14 @@ export default function HostRoom() {
       console.error('Capture failed:', err);
       alert('Could not capture audio. Please ensure you grant the required permissions.');
     }
-  }, [listeners]);
+  }, []); // no external deps needed — everything is accessed via refs or stable socket
 
-  // When stream changes, send offers to existing listeners
+  // When stream changes, send offers to any listeners already in the room.
   useEffect(() => {
     if (stream && listeners.length > 0) {
       listeners.forEach((l) => createOffer(l.id));
     }
   }, [stream]); // intentionally only re-run when stream changes
-
-  const handleStop = useCallback(() => {
-    stream?.getTracks().forEach((t) => t.stop());
-    setStream(null);
-    setStreaming(false);
-    setPaused(false);
-    closeAll();
-    if (syncInterval.current) clearInterval(syncInterval.current);
-    socket.emit('host:stop');
-    navigate('/');
-  }, [stream, navigate, closeAll]);
 
   const handlePause = () => {
     if (paused) {
@@ -274,7 +291,8 @@ export default function HostRoom() {
                   </li>
                 ))}
               </ul>
-            )}\n          </GlowCard>
+            )}
+          </GlowCard>
         </div>
       </div>
     </div>

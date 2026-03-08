@@ -13,7 +13,8 @@ export default function JoinPage() {
 
   useEffect(() => {
     if (!code) return;
-    getRoomInfo(code.trim().toUpperCase())
+    const upperCode = code.trim().toUpperCase();
+    getRoomInfo(upperCode)
       .then(setRoom)
       .catch((err) => {
         console.error('Room info error:', err);
@@ -23,7 +24,9 @@ export default function JoinPage() {
   }, [code]);
 
   const handleJoin = () => {
-    navigate(`/listen/${room?.id || code.trim().toUpperCase()}`);
+    // Always navigate with the room CODE. ListenerRoom sends it to the server
+    // which looks up the room by code (getRoomByCode).
+    navigate(`/listen/${code.trim().toUpperCase()}`);
   };
 
   if (loading) {
