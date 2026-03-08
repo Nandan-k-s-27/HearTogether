@@ -15,3 +15,13 @@ export async function getRoomInfo(code) {
   if (!res.ok) throw new Error('Room not found');
   return res.json();
 }
+
+export async function getIceServers() {
+  try {
+    const res = await fetch(`${API_BASE}/ice-servers`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import socket from '../services/socket';
 import { useHostWebRTC } from '../hooks/useWebRTC';
+import { getIceServers } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 
@@ -21,8 +22,17 @@ export default function HostRoom() {
   const [paused, setPaused] = useState(false);
   const [listeners, setListeners] = useState([]);
   const [stream, setStream] = useState(null);
+  const [iceServersConfig, setIceServersConfig] = useState(null);
 
-  const { createOffer, handleAnswer, handleIceCandidate, removePeer, closeAll } = useHostWebRTC(socket, stream);
+  // Fetch TURN-capable ICE servers from backend as early as possible so they
+  // are ready before the first listener joins and createOffer() is called.
+  useEffect(() => {
+    getIceServers().then((data) => {
+      if (data?.iceServers) setIceServersConfig({ iceServers: data.iceServers });
+    });
+  }, []);
+
+  const { createOffer, handleAnswer, handleIceCandidate, removePeer, closeAll } = useHostWebRTC(socket, stream, iceServersConfig);
   const syncInterval = useRef(null);
   // streamRef always holds the current stream — safe to use inside async callbacks
   // without worrying about stale closures over the `stream` state variable.

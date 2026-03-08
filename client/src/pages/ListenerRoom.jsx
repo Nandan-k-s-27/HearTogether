@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import socket from '../services/socket';
 import { useListenerWebRTC } from '../hooks/useWebRTC';
+import { getIceServers } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 
@@ -11,14 +12,25 @@ export default function ListenerRoom() {
 
   const [status, setStatus] = useState('connecting'); // connecting | listening | paused | ended
   const [volume, setVolume] = useState(1);
-  const [syncOffset, setSyncOffset] = useState(0);
   // audioReady  → remote stream has arrived, waiting for user tap to play
   // audioPlaying → audio.play() succeeded, currently streaming
   const [audioReady, setAudioReady] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
+  // connState tracks actual WebRTC ICE/DTLS state (not just socket signaling)
+  const [connState, setConnState] = useState('new'); // new|connecting|connected|disconnected|failed|closed
+  const [iceServersConfig, setIceServersConfig] = useState(null);
+
+  // Fetch TURN-capable ICE servers from backend as early as possible.
+  useEffect(() => {
+    getIceServers().then((data) => {
+      if (data?.iceServers) setIceServersConfig({ iceServers: data.iceServers });
+    });
+  }, []);
 
   const { handleOffer, handleIceCandidate, close, audioRef, remoteStreamRef } = useListenerWebRTC(socket, {
     onTrackReady: () => setAudioReady(true),
+    onConnectionState: setConnState,
+    iceServersConfig,
   });
   const audioElRef = useRef(null);
 
@@ -97,20 +109,12 @@ export default function ListenerRoom() {
       close();
     };
 
-    // Sync correction
-    const onSync = ({ timestamp, serverTime }) => {
-      const now = Date.now();
-      const offset = now - serverTime;
-      setSyncOffset(offset);
-    };
-
     socket.on('signal:offer', onOffer);
     socket.on('signal:ice-candidate', onIce);
     socket.on('host:paused', onPaused);
     socket.on('host:resumed', onResumed);
     socket.on('host:stopped', onStopped);
     socket.on('host:removed', onRemoved);
-    socket.on('sync:timestamp', onSync);
 
     return () => {
       socket.off('signal:offer', onOffer);
@@ -119,7 +123,6 @@ export default function ListenerRoom() {
       socket.off('host:resumed', onResumed);
       socket.off('host:stopped', onStopped);
       socket.off('host:removed', onRemoved);
-      socket.off('sync:timestamp', onSync);
     };
   }, [handleOffer, handleIceCandidate, close]);
 
@@ -149,6 +152,32 @@ export default function ListenerRoom() {
           <p className={`text-lg font-semibold ${s.color}`}>{s.label}</p>
           <p className="mt-1 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
         </div>
+
+        {/* WebRTC connection state — shown while audio is not yet playing */}
+        {!audioPlaying && status !== 'ended' && (
+          <div className={`mb-4 flex items-center justify-center gap-2 text-xs rounded-lg px-3 py-2 ${
+            connState === 'connected'
+              ? 'bg-green-900/40 text-green-300'
+              : connState === 'failed'
+              ? 'bg-red-900/40 text-red-300'
+              : connState === 'disconnected'
+              ? 'bg-yellow-900/40 text-yellow-300'
+              : 'bg-gray-800/60 text-gray-400'
+          }`}>
+            <span className={`h-2 w-2 rounded-full ${
+              connState === 'connected' ? 'bg-green-400' :
+              connState === 'failed' ? 'bg-red-400' :
+              connState === 'disconnected' ? 'bg-yellow-400' :
+              'bg-gray-500 animate-pulse'
+            }`} />
+            {connState === 'new' && 'Waiting for stream…'}
+            {connState === 'connecting' && 'Connecting audio path…'}
+            {connState === 'connected' && 'Audio path ready'}
+            {connState === 'disconnected' && 'Connection interrupted, retrying…'}
+            {connState === 'failed' && 'Connection failed — try reconnecting'}
+            {connState === 'closed' && 'Connection closed'}
+          </div>
+        )}
 
         {/* Hidden audio element — playback triggered by user tap, not autoplay */}
         <audio ref={setAudioEl} playsInline muted />
@@ -187,28 +216,10 @@ export default function ListenerRoom() {
         )}
 
         {/* Sync indicator */}
-        {status === 'listening' && (
-          <div className="mb-6 flex items-center justify-center gap-2 text-sm text-gray-400">
+        {audioPlaying && status === 'listening' && (
+          <div className="mb-4 flex items-center justify-center gap-2 text-xs text-green-400">
             <span className="h-2 w-2 rounded-full bg-green-500" />
-            Sync offset: {syncOffset}ms
-          </div>
-        )}
-
-        {/* Connection quality visual */}
-        {status === 'listening' && (
-          <div className="mb-6 flex items-center justify-center gap-1">
-            {[...Array(4)].map((_, i) => (
-              <div
-                key={i}
-                className={`w-2 rounded-sm ${
-                  i < (Math.abs(syncOffset) < 100 ? 4 : Math.abs(syncOffset) < 300 ? 3 : 2)
-                    ? 'bg-green-500'
-                    : 'bg-gray-700'
-                }`}
-                style={{ height: `${(i + 1) * 6}px` }}
-              />
-            ))}
-            <span className="ml-2 text-xs text-gray-500">Connection</span>
+            Connected
           </div>
         )}
 

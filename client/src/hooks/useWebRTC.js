@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect } from 'react';
 
-const ICE_SERVERS = {
+const DEFAULT_ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
@@ -10,13 +10,15 @@ const ICE_SERVERS = {
 /**
  * Hook for the HOST side: creates a peer connection per listener and sends audio.
  */
-export function useHostWebRTC(socket, stream) {
+export function useHostWebRTC(socket, stream, iceServersConfig) {
   const peers = useRef(new Map()); // listenerId -> RTCPeerConnection
+  const iceRef = useRef(iceServersConfig ?? DEFAULT_ICE_SERVERS);
+  useEffect(() => { iceRef.current = iceServersConfig ?? DEFAULT_ICE_SERVERS; }, [iceServersConfig]);
 
   const createOffer = useCallback(
     async (listenerId) => {
       if (!stream) return;
-      const pc = new RTCPeerConnection(ICE_SERVERS);
+      const pc = new RTCPeerConnection(iceRef.current);
       peers.current.set(listenerId, pc);
 
       // Add audio tracks
@@ -71,18 +73,27 @@ export function useHostWebRTC(socket, stream) {
  * all mobile browsers require an explicit user gesture before audio can play,
  * and relying on error-detection misses several browser-specific error codes.
  */
-export function useListenerWebRTC(socket, { onTrackReady } = {}) {
+export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, iceServersConfig } = {}) {
   const pcRef = useRef(null);
   const remoteStreamRef = useRef(null);
   const audioRef = useRef(null);
-  // Ref-wrap the callback so the ontrack closure never holds a stale value.
+  // Ref-wrap callbacks so closures never hold stale values.
   const onTrackReadyRef = useRef(onTrackReady);
+  const onConnectionStateRef = useRef(onConnectionState);
+  const iceRef = useRef(iceServersConfig ?? DEFAULT_ICE_SERVERS);
   useEffect(() => { onTrackReadyRef.current = onTrackReady; }, [onTrackReady]);
+  useEffect(() => { onConnectionStateRef.current = onConnectionState; }, [onConnectionState]);
+  useEffect(() => { iceRef.current = iceServersConfig ?? DEFAULT_ICE_SERVERS; }, [iceServersConfig]);
 
   const handleOffer = useCallback(
     async (hostId, offer) => {
-      const pc = new RTCPeerConnection(ICE_SERVERS);
+      const pc = new RTCPeerConnection(iceRef.current);
       pcRef.current = pc;
+
+      // Track real ICE/DTLS connection state so the UI can surface failures.
+      pc.onconnectionstatechange = () => {
+        onConnectionStateRef.current?.(pc.connectionState);
+      };
 
       pc.onicecandidate = (e) => {
         if (e.candidate) {

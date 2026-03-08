@@ -65,6 +65,40 @@ app.post('/api/rooms', createRoomLimiter, (_req, res) => {
   res.status(201).json(room);
 });
 
+// ICE server configuration (STUN + optional TURN for NAT traversal)
+app.get('/api/ice-servers', (_req, res) => {
+  res.setHeader('Cache-Control', 'private, max-age=60');
+  const servers = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ];
+
+  const turnUrl = process.env.TURN_URL;
+  const turnUser = process.env.TURN_USERNAME;
+  const turnCred = process.env.TURN_CREDENTIAL;
+
+  if (turnUrl && turnUser && turnCred) {
+    // Support comma-separated TURN URLs for multiple endpoints
+    turnUrl.split(',').map((u) => u.trim()).forEach((url) => {
+      servers.push({ urls: url, username: turnUser, credential: turnCred });
+    });
+  } else {
+    // Open Relay public TURN — suitable for development and small-scale use.
+    // For production replace with TURN_URL / TURN_USERNAME / TURN_CREDENTIAL env vars.
+    const openRelay = [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:80?transport=tcp',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp',
+    ];
+    openRelay.forEach((url) => {
+      servers.push({ urls: url, username: 'openrelayproject', credential: 'openrelayproject' });
+    });
+  }
+
+  res.json({ iceServers: servers });
+});
+
 // REST: get room info
 app.get('/api/rooms/:code', (req, res) => {
   const code = req.params.code.replace(/[^A-Za-z0-9]/g, '').slice(0, 20).toUpperCase();
