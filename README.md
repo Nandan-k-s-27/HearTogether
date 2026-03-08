@@ -98,6 +98,24 @@ HearTogether/
 - **Real-time WebRTC** peer-to-peer audio to all listeners
 - **Room controls**: pause, resume, stop, remove individual listeners
 - **Listener view**: volume control, connection quality indicator, sync offset display
+- **Automatic Sync**: Real-time synchronization between host and listeners
+- **Session Security**: Rate limiting for room creation and CORS protection
+
+## Troubleshooting
+
+### "Room not found or has ended"
+- Ensure the Host has not closed the room.
+- Check if you entered the code correctly. Codes are case-insensitive.
+- If using a link, ensure it follows the format `/room/CODE`.
+
+### "No audio heard as a Listener"
+- The host must select an audio source (Tab, Screen, or Mic) and click "Start".
+- Ensure you have granted microphone/screen permissions if you are the host.
+- Some browsers require a user interaction (like clicking "Start Listening") before playing audio.
+
+### "Screen sharing doesn't stop"
+- If the host stops sharing via the browser's "Stop sharing" button, the room will now correctly detect this and end the session.
+- You can also click the "Stop" button within the HearTogether interface.
 - **Light / System / Dark** theme switcher with OS-preference sync and localStorage persistence
 - **No account required** — join by QR scan or room code
 - **Security hardened**: HTTP security headers (helmet), rate-limiting on room creation, input sanitisation, stale-room cleanup

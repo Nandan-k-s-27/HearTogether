@@ -12,14 +12,18 @@ export default function JoinPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getRoomInfo(code)
+    if (!code) return;
+    getRoomInfo(code.trim().toUpperCase())
       .then(setRoom)
-      .catch(() => setError('Room not found or has ended.'))
+      .catch((err) => {
+        console.error('Room info error:', err);
+        setError('Room not found or has ended.');
+      })
       .finally(() => setLoading(false));
   }, [code]);
 
   const handleJoin = () => {
-    navigate(`/listen/${code}`);
+    navigate(`/listen/${room?.id || code.trim().toUpperCase()}`);
   };
 
   if (loading) {

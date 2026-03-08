@@ -76,7 +76,7 @@ export default function HostRoom() {
     };
   }, [stream, createOffer, handleAnswer, handleIceCandidate, removePeer]);
 
-  // Start capturing audio
+      // Start capturing audio
   const startCapture = useCallback(async (type) => {
     try {
       let mediaStream;
@@ -86,9 +86,23 @@ export default function HostRoom() {
         // getDisplayMedia with audio for tab/screen capture
         mediaStream = await navigator.mediaDevices.getDisplayMedia({
           video: true, // required but we only use audio
-          audio: true,
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          },
+          systemAudio: 'include',
           preferCurrentTab: type === 'tab',
         });
+        
+        // Handle when user clicks "Stop sharing" in the browser's own UI
+        mediaStream.getVideoTracks().forEach((track) => {
+          track.onended = () => {
+             // If we are still streaming, it means the user clicked browser's stop share button
+             handleStop(); 
+          };
+        });
+
         // Remove video tracks — we only need audio
         mediaStream.getVideoTracks().forEach((t) => t.stop());
       }
@@ -113,6 +127,17 @@ export default function HostRoom() {
     }
   }, [stream]); // intentionally only re-run when stream changes
 
+  const handleStop = useCallback(() => {
+    stream?.getTracks().forEach((t) => t.stop());
+    setStream(null);
+    setStreaming(false);
+    setPaused(false);
+    closeAll();
+    if (syncInterval.current) clearInterval(syncInterval.current);
+    socket.emit('host:stop');
+    navigate('/');
+  }, [stream, navigate, closeAll]);
+
   const handlePause = () => {
     if (paused) {
       socket.emit('host:resume');
@@ -123,17 +148,6 @@ export default function HostRoom() {
       stream?.getAudioTracks().forEach((t) => { t.enabled = false; });
     }
     setPaused(!paused);
-  };
-
-  const handleStop = () => {
-    stream?.getTracks().forEach((t) => t.stop());
-    setStream(null);
-    setStreaming(false);
-    setPaused(false);
-    closeAll();
-    if (syncInterval.current) clearInterval(syncInterval.current);
-    socket.emit('host:stop');
-    navigate('/');
   };
 
   const handleRemoveListener = (listenerId) => {
