@@ -12,7 +12,11 @@ export default function ListenerRoom() {
   const [status, setStatus] = useState('connecting'); // connecting | listening | paused | ended
   const [volume, setVolume] = useState(1);
   const [syncOffset, setSyncOffset] = useState(0);
-  const { handleOffer, handleIceCandidate, close, audioRef } = useListenerWebRTC(socket);
+  // True when the browser's autoplay policy blocked audio (common on mobile).
+  const [needsGesture, setNeedsGesture] = useState(false);
+  const { handleOffer, handleIceCandidate, close, audioRef } = useListenerWebRTC(socket, {
+    onNeedsGesture: () => setNeedsGesture(true),
+  });
   const audioElRef = useRef(null);
 
   // Connect & join room
@@ -120,8 +124,20 @@ export default function ListenerRoom() {
           <p className="mt-1 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
         </div>
 
-        {/* Audio element */}
+        {/* Audio element — hidden, playback managed via srcObject */}
         <audio ref={setAudioEl} autoPlay playsInline />
+
+        {/* Mobile autoplay unlock button */}
+        {needsGesture && (
+          <button
+            onClick={() => {
+              audioElRef.current?.play().then(() => setNeedsGesture(false)).catch(() => {});
+            }}
+            className="mb-6 w-full rounded-xl bg-brand-500 py-3 text-lg font-semibold text-white animate-pulse hover:animate-none hover:bg-brand-600 transition"
+          >
+            🔊 Tap to Hear Audio
+          </button>
+        )}
 
         {/* Volume */}
         {status !== 'ended' && (

@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 
 const ICE_SERVERS = {
   iceServers: [
@@ -66,10 +66,13 @@ export function useHostWebRTC(socket, stream) {
 /**
  * Hook for the LISTENER side: receives audio from host.
  */
-export function useListenerWebRTC(socket) {
+export function useListenerWebRTC(socket, { onNeedsGesture } = {}) {
   const pcRef = useRef(null);
   const remoteStreamRef = useRef(null);
   const audioRef = useRef(null);
+  // Keep the latest callback in a ref so the ontrack closure is never stale.
+  const onNeedsGestureRef = useRef(onNeedsGesture);
+  useEffect(() => { onNeedsGestureRef.current = onNeedsGesture; }, [onNeedsGesture]);
 
   const handleOffer = useCallback(
     async (hostId, offer) => {
@@ -86,7 +89,15 @@ export function useListenerWebRTC(socket) {
         remoteStreamRef.current = e.streams[0];
         if (audioRef.current) {
           audioRef.current.srcObject = e.streams[0];
-          audioRef.current.play().catch(() => {});
+          // Mobile browsers (Android Chrome, iOS Safari) block autoplay for
+          // events that are not directly triggered by a user gesture. We try
+          // to play, and if it is blocked we surface a callback so the UI can
+          // show a "Tap to hear" button.
+          audioRef.current.play().catch((err) => {
+            if (err.name === 'NotAllowedError' || err.name === 'NotSupportedError') {
+              onNeedsGestureRef.current?.();
+            }
+          });
         }
       };
 
