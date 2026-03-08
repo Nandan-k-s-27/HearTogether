@@ -9,17 +9,24 @@ const { createRoom, getRoom, deleteRoom, addListener, removeListener, getRoomByC
 const app = express();
 const server = http.createServer(app);
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+// Support comma-separated origins e.g. "https://foo.vercel.app,https://www.foo.com"
+const rawOrigins = process.env.FRONTEND_URL || 'http://localhost:5173';
+const ALLOWED_ORIGINS = rawOrigins.split(',').map((o) => o.trim());
+console.log('[cors] allowed origins:', ALLOWED_ORIGINS);
 
-const io = new Server(server, {
-  cors: {
-    origin: FRONTEND_URL,
-    methods: ['GET', 'POST'],
+const corsOptions = {
+  origin: (origin, cb) => {
+    // Allow requests with no origin (curl, health checks)
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS blocked: ${origin}`));
   },
-});
+  methods: ['GET', 'POST'],
+};
+
+const io = new Server(server, { cors: corsOptions });
 
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: FRONTEND_URL }));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10kb' }));
 
 const createRoomLimiter = rateLimit({
@@ -41,6 +48,11 @@ setInterval(() => {
     }
   }
 }, 60 * 60 * 1000); // run every hour
+
+// Root route – confirms server is live
+app.get('/', (_req, res) => {
+  res.json({ service: 'HearTogether API', status: 'ok' });
+});
 
 // Health check
 app.get('/api/health', (_req, res) => {
