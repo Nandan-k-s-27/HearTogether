@@ -19,12 +19,19 @@ export default function ListenerRoom() {
   // connState tracks actual WebRTC ICE/DTLS state (not just socket signaling)
   const [connState, setConnState] = useState('new'); // new|connecting|connected|disconnected|failed|closed
   const [iceServersConfig, setIceServersConfig] = useState(null);
+  // iceReady gates the socket join — we must not emit listener:join until the
+  // ICE servers fetch has settled.  If the offer arrives before iceRef is
+  // updated the RTCPeerConnection is created with STUN-only and TURN relay
+  // is never used, causing silent audio failure on cellular networks.
+  const [iceReady, setIceReady] = useState(false);
 
-  // Fetch TURN-capable ICE servers from backend as early as possible.
+  // Fetch TURN-capable ICE servers FIRST, then join the room.
   useEffect(() => {
-    getIceServers().then((data) => {
-      if (data?.iceServers) setIceServersConfig({ iceServers: data.iceServers });
-    });
+    getIceServers()
+      .then((data) => {
+        if (data?.iceServers) setIceServersConfig({ iceServers: data.iceServers });
+      })
+      .finally(() => setIceReady(true)); // always unblock join, even on fetch failure
   }, []);
 
   const { handleOffer, handleIceCandidate, close, audioRef, remoteStreamRef } = useListenerWebRTC(socket, {
@@ -70,8 +77,10 @@ export default function ListenerRoom() {
       });
   }, [volume, remoteStreamRef]);
 
-  // Connect & join room
+  // Connect & join room — gated on iceReady so TURN credentials are loaded
+  // into iceRef before the host's offer arrives and creates the peer connection.
   useEffect(() => {
+    if (!iceReady) return;
     if (!socket.connected) socket.connect();
 
     socket.emit('listener:join', { roomCode }, (res) => {
@@ -87,7 +96,7 @@ export default function ListenerRoom() {
       close();
       socket.disconnect();
     };
-  }, [roomCode, navigate, close]);
+  }, [iceReady, roomCode, navigate, close]);
 
   // Signaling events
   useEffect(() => {

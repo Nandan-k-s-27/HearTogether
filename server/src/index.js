@@ -74,8 +74,13 @@ app.get('/api/ice-servers', (_req, res) => {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      // Port 3478 — standard TURN UDP port; lowest latency on mobile networks.
+      { urls: 'turn:openrelay.metered.ca:3478',                username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:3478?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
+      // Port 80 TCP — fallback when UDP 3478 is blocked.
       { urls: 'turn:openrelay.metered.ca:80',                  username: 'openrelayproject', credential: 'openrelayproject' },
       { urls: 'turn:openrelay.metered.ca:80?transport=tcp',    username: 'openrelayproject', credential: 'openrelayproject' },
+      // Port 443 TCP — last resort; almost never blocked.
       { urls: 'turn:openrelay.metered.ca:443',                 username: 'openrelayproject', credential: 'openrelayproject' },
       { urls: 'turn:openrelay.metered.ca:443?transport=tcp',   username: 'openrelayproject', credential: 'openrelayproject' },
     ],
