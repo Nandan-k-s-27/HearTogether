@@ -22,6 +22,22 @@ function createRoom() {
   return { id, code };
 }
 
+// Recreate a room with an existing ID (used when the server restarts and the
+// host reconnects with its old roomId still in the URL).
+function createRoomWithId(id) {
+  const code = generateCode();
+  const room = {
+    id,
+    code,
+    hostSocketId: null,
+    hostConnected: false,
+    listeners: new Map(),
+    createdAt: Date.now(),
+  };
+  rooms.set(id, room);
+  return { id, code };
+}
+
 function getRoom(id) {
   return rooms.get(id) || null;
 }
@@ -53,4 +69,4 @@ function getAllRooms() {
   return Array.from(rooms.values());
 }
 
-module.exports = { createRoom, getRoom, getRoomByCode, deleteRoom, addListener, removeListener, getAllRooms };
+module.exports = { createRoom, createRoomWithId, getRoom, getRoomByCode, deleteRoom, addListener, removeListener, getAllRooms };

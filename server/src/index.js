@@ -4,7 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { createRoom, getRoom, deleteRoom, addListener, removeListener, getRoomByCode, getAllRooms } = require('./rooms');
+const { createRoom, createRoomWithId, getRoom, deleteRoom, addListener, removeListener, getRoomByCode, getAllRooms } = require('./rooms');
 
 const app = express();
 const server = http.createServer(app);
@@ -101,8 +101,15 @@ io.on('connection', (socket) => {
 
   // Host joins room
   socket.on('host:join', ({ roomId }, cb) => {
-    const room = getRoom(roomId);
-    if (!room) return cb?.({ error: 'Room not found' });
+    let room = getRoom(roomId);
+    if (!room) {
+      // Room not in memory — server most likely restarted (Render free-tier
+      // spin-up wipes in-memory state).  Recreate the room with the same ID
+      // so the host's existing URL stays valid and listeners can still join.
+      const created = createRoomWithId(roomId);
+      room = getRoom(created.id);
+      console.log(`[room ${room.code}] recreated after server restart (id=${roomId})`);
+    }
     room.hostSocketId = socket.id;
     room.hostConnected = true;
     socket.join(roomId);

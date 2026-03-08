@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import socket from '../services/socket';
 import { useListenerWebRTC } from '../hooks/useWebRTC';
-import { getIceServers } from '../services/api';
+import { getIceServers, pingServer } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 
@@ -83,20 +83,42 @@ export default function ListenerRoom() {
     if (!iceReady) return;
     if (!socket.connected) socket.connect();
 
-    socket.emit('listener:join', { roomCode }, (res) => {
-      if (res?.error) {
-        alert(res.error);
-        navigate('/');
-        return;
-      }
-      setStatus('listening');
-    });
+    let retries = 0;
+    const MAX_RETRIES = 5;
+    const RETRY_DELAY = 2000; // ms
+
+    function tryJoin() {
+      socket.emit('listener:join', { roomCode }, (res) => {
+        if (res?.error) {
+          // "Room not found" can happen when the server just restarted and the
+          // host hasn't re-joined yet.  Retry a few times with backoff before
+          // giving up and navigating home.
+          if (res.error.includes('not found') && retries < MAX_RETRIES) {
+            retries++;
+            setTimeout(tryJoin, RETRY_DELAY * retries);
+            return;
+          }
+          alert(res.error);
+          navigate('/');
+          return;
+        }
+        setStatus('listening');
+      });
+    }
+
+    tryJoin();
 
     return () => {
       close();
       socket.disconnect();
     };
   }, [iceReady, roomCode, navigate, close]);
+
+  // Keep Render awake: ping /api/health every 8 minutes.
+  useEffect(() => {
+    const id = setInterval(pingServer, 8 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Signaling events
   useEffect(() => {

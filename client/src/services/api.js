@@ -25,3 +25,9 @@ export async function getIceServers() {
     return null;
   }
 }
+
+// Keeps the Render free-tier server awake by sending a periodic HTTP request.
+// Render spins down after 15 min of no HTTP traffic; a ping every 8 min prevents that.
+export function pingServer() {
+  fetch(`${API_BASE}/health`).catch(() => {});
+}

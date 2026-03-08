@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import socket from '../services/socket';
 import { useHostWebRTC } from '../hooks/useWebRTC';
-import { getIceServers } from '../services/api';
+import { getIceServers, pingServer } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 
@@ -59,6 +59,32 @@ export default function HostRoom() {
       socket.disconnect();
     };
   }, [roomId, navigate, closeAll]);
+
+  // Re-join the room when the socket reconnects after a server restart.
+  // Socket.IO fires 'reconnect' only on subsequent connections, never the first.
+  useEffect(() => {
+    const onReconnect = () => {
+      socket.emit('host:join', { roomId }, (res) => {
+        if (res?.error) {
+          alert('Server restarted and could not recover your session. Please create a new room.');
+          navigate('/');
+          return;
+        }
+        // Server may have assigned a new code after the restart — update QR / display.
+        setRoomCode(res.code);
+      });
+    };
+    socket.io.on('reconnect', onReconnect);
+    return () => socket.io.off('reconnect', onReconnect);
+  }, [roomId, navigate]);
+
+  // Keep Render awake: ping /api/health every 8 minutes.
+  // Render free tier spins down after 15 min of no HTTP requests;
+  // WebSocket messages don’t count as activity for Render’s purposes.
+  useEffect(() => {
+    const id = setInterval(pingServer, 8 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Listen for signaling events
   useEffect(() => {
