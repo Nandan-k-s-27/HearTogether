@@ -9,7 +9,6 @@ import { ShimmerButton } from '../components/ui/shimmer-button';
 
 const CAPTURE_OPTIONS = [
   { id: 'tab', label: 'Browser Tab Audio', desc: 'Capture audio from a browser tab (recommended)' },
-  { id: 'screen', label: 'Screen + Audio', desc: 'Capture screen share with system audio' },
   { id: 'mic', label: 'Microphone', desc: 'Broadcast live microphone input' },
 ];
 
