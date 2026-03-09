@@ -227,7 +227,7 @@ export default function HostRoom() {
     <div className="min-h-screen px-4 py-8 md:px-12">
       {/* Header */}
       <header className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">🎧 HearTogether</h1>
+        <h1 className="text-2xl font-bold">HearTogether</h1>
         {streaming && (
           <div className="flex items-center gap-2 text-sm">
             <span className="relative flex h-3 w-3">
