@@ -181,12 +181,19 @@ export default function ListenerRoom() {
       <GlowCard customSize glowColor="blue" className="w-full max-w-md text-center">
         <h1 className="mb-6 text-2xl font-bold">🎧 HearTogether</h1>
 
-        {/* Status */}
-        <div className="mb-6">
-          <div className="text-5xl mb-2">{s.icon}</div>
-          <p className={`text-lg font-semibold ${s.color}`}>{s.label}</p>
-          <p className="mt-1 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
-        </div>
+        {/* Status — hidden while the socket is still joining (connects near-
+            instantly so showing a 'Connecting' flash is more confusing than
+            helpful; the connState pill below already covers ICE progress). */}
+        {status !== 'connecting' && (
+          <div className="mb-6">
+            <div className="text-5xl mb-2">{s.icon}</div>
+            <p className={`text-lg font-semibold ${s.color}`}>{s.label}</p>
+            <p className="mt-1 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
+          </div>
+        )}
+        {status === 'connecting' && (
+          <p className="mb-6 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
+        )}
 
         {/* WebRTC connection state — shown while audio is not yet playing */}
         {!audioPlaying && status !== 'ended' && (
