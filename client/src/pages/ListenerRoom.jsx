@@ -99,7 +99,9 @@ export default function ListenerRoom() {
             return;
           }
           alert(res.error);
-          navigate('/');
+          // replace: true removes this room URL from history so pressing back
+          // from home does not re-mount this component and attempt reconnect.
+          navigate('/', { replace: true });
           return;
         }
         setStatus('listening');
@@ -160,7 +162,9 @@ export default function ListenerRoom() {
   const handleLeave = () => {
     close();
     socket.disconnect();
-    navigate('/');
+    // replace: true removes this room URL from history so pressing the device
+    // back button from home does not land back here and attempt reconnect.
+    navigate('/', { replace: true });
   };
 
   const statusConfig = {
@@ -210,19 +214,24 @@ export default function ListenerRoom() {
           </div>
         )}
 
-        {/* Hidden audio element — playback triggered by user tap, not autoplay */}
-        <audio ref={setAudioEl} playsInline muted />
+        {/* Hidden audio element — playback triggered by user tap, not autoplay.
+            Do NOT set the HTML muted attribute here — some mobile browsers
+            (especially iOS Safari) treat a muted HTML attribute as sticky and
+            refuse to unmute via JS.  The element starts silent because it has
+            no srcObject; handleStartAudio() calls play() inside a user gesture. */}
+        <audio ref={setAudioEl} playsInline />
 
-        {/* ── "Tap to play" button ──────────────────────────────────────────
-            Shown as soon as the remote stream arrives.
-            Must be a real tap/click so mobile browsers allow audio.play().   */}
+        {/* Shown as soon as the remote stream arrives.
+            Must be a real tap/click so mobile browsers allow audio.play(). */}
         {audioReady && !audioPlaying && (
-          <button
+          <ShimmerButton
             onClick={handleStartAudio}
-            className="mb-6 w-full rounded-xl bg-brand-500 py-4 text-lg font-bold text-white shadow-lg animate-pulse hover:animate-none hover:bg-brand-600 active:scale-95 transition-transform"
+            background="rgba(76, 110, 245, 1)"
+            shimmerColor="#ffffff"
+            className="dark:text-white mb-6 w-full text-lg font-semibold"
           >
-            🔊 Tap to Hear Audio
-          </button>
+            Tap to Hear
+          </ShimmerButton>
         )}
 
         {/* Volume — only shown once playback has actually started */}
@@ -258,7 +267,7 @@ export default function ListenerRoom() {
         <div className="flex flex-col gap-3">
           {status === 'ended' ? (
             <ShimmerButton
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/', { replace: true })}
               background="rgba(76, 110, 245, 1)"
               shimmerColor="#ffffff"
               className="dark:text-white w-full font-semibold"

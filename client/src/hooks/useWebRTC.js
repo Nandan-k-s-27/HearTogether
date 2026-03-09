@@ -1,23 +1,54 @@
 import { useRef, useCallback, useEffect } from 'react';
 
+// Extra RTCPeerConnection options that improve connectivity and performance.
+// Mirrors what SmartMeet (and most production WebRTC apps) configure:
+//   iceCandidatePoolSize – pre-gathers candidates before offer so the very
+//     first connection attempt is faster (no cold-start delay).
+//   bundlePolicy        – forces all tracks onto a single 5-tuple, saving
+//     bandwidth and avoiding separate ICE negotiations per track.
+//   iceTransportPolicy  – 'all' means host, srflx AND relay (TURN) candidates
+//     are tried; without this some browsers skip relay candidates silently.
+const EXTRA_PC_OPTIONS = {
+  iceCandidatePoolSize: 10,
+  bundlePolicy: 'max-bundle',
+  iceTransportPolicy: 'all',
+};
+
 const DEFAULT_ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
   ],
+  ...EXTRA_PC_OPTIONS,
 };
+
+// Log which ICE candidate types are gathered — helps diagnose whether TURN
+// relay candidates arrive.  Only fires in non-production for debugging.
+function logIceCandidate(label, candidate) {
+  if (!candidate) return;
+  const c = candidate.candidate || '';
+  const type = candidate.type || (c.includes('relay') ? 'relay' : c.includes('srflx') ? 'srflx' : 'host');
+  console.log(`[ICE ${label}] ${type}: ${c.slice(0, 80)}`);
+}
 
 /**
  * Hook for the HOST side: creates a peer connection per listener and sends audio.
  */
 export function useHostWebRTC(socket, stream, iceServersConfig) {
   const peers = useRef(new Map()); // listenerId -> RTCPeerConnection
-  const iceRef = useRef(iceServersConfig ?? DEFAULT_ICE_SERVERS);
-  useEffect(() => { iceRef.current = iceServersConfig ?? DEFAULT_ICE_SERVERS; }, [iceServersConfig]);
+  const iceRef = useRef(iceServersConfig ? { ...iceServersConfig, ...EXTRA_PC_OPTIONS } : DEFAULT_ICE_SERVERS);
+  useEffect(() => {
+    iceRef.current = iceServersConfig ? { ...iceServersConfig, ...EXTRA_PC_OPTIONS } : DEFAULT_ICE_SERVERS;
+  }, [iceServersConfig]);
 
   const createOffer = useCallback(
     async (listenerId) => {
       if (!stream) return;
+      // Close stale connection if one already exists for this listener.
+      const old = peers.current.get(listenerId);
+      if (old) old.close();
+
       const pc = new RTCPeerConnection(iceRef.current);
       peers.current.set(listenerId, pc);
 
@@ -28,7 +59,24 @@ export function useHostWebRTC(socket, stream, iceServersConfig) {
 
       pc.onicecandidate = (e) => {
         if (e.candidate) {
+          logIceCandidate('host', e.candidate);
           socket.emit('signal:ice-candidate', { to: listenerId, candidate: e.candidate });
+        }
+      };
+
+      // Auto-restart ICE when media path fails (network switch, timeout, etc.)
+      let iceRestarts = 0;
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'failed' && iceRestarts < 3) {
+          iceRestarts++;
+          console.log(`[WebRTC] host→${listenerId} failed – ICE restart #${iceRestarts}`);
+          pc.restartIce();
+          pc.createOffer({ iceRestart: true })
+            .then((o) => pc.setLocalDescription(o))
+            .then(() => socket.emit('signal:offer', { to: listenerId, offer: pc.localDescription }))
+            .catch((err) => console.error('[WebRTC] ICE restart error:', err));
+        } else if (pc.connectionState === 'connected') {
+          iceRestarts = 0;
         }
       };
 
@@ -80,13 +128,33 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
   // Ref-wrap callbacks so closures never hold stale values.
   const onTrackReadyRef = useRef(onTrackReady);
   const onConnectionStateRef = useRef(onConnectionState);
-  const iceRef = useRef(iceServersConfig ?? DEFAULT_ICE_SERVERS);
+  const iceRef = useRef(iceServersConfig ? { ...iceServersConfig, ...EXTRA_PC_OPTIONS } : DEFAULT_ICE_SERVERS);
   useEffect(() => { onTrackReadyRef.current = onTrackReady; }, [onTrackReady]);
   useEffect(() => { onConnectionStateRef.current = onConnectionState; }, [onConnectionState]);
-  useEffect(() => { iceRef.current = iceServersConfig ?? DEFAULT_ICE_SERVERS; }, [iceServersConfig]);
+  useEffect(() => {
+    iceRef.current = iceServersConfig ? { ...iceServersConfig, ...EXTRA_PC_OPTIONS } : DEFAULT_ICE_SERVERS;
+  }, [iceServersConfig]);
+
+  const hostIdRef = useRef(null);
 
   const handleOffer = useCallback(
     async (hostId, offer) => {
+      // Same host re-sending offer on a live connection → ICE restart.
+      // Reuse the existing RTCPeerConnection so relay candidates are
+      // renegotiated without dropping the media stream.
+      const existingPc = pcRef.current;
+      if (existingPc && existingPc.signalingState !== 'closed' && hostIdRef.current === hostId) {
+        await existingPc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await existingPc.createAnswer();
+        await existingPc.setLocalDescription(answer);
+        socket.emit('signal:answer', { to: hostId, answer });
+        return;
+      }
+
+      // Different host or first offer — close old connection and create new one.
+      if (existingPc) existingPc.close();
+      hostIdRef.current = hostId;
+
       const pc = new RTCPeerConnection(iceRef.current);
       pcRef.current = pc;
 
@@ -97,6 +165,7 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
 
       pc.onicecandidate = (e) => {
         if (e.candidate) {
+          logIceCandidate('listener', e.candidate);
           socket.emit('signal:ice-candidate', { to: hostId, candidate: e.candidate });
         }
       };
@@ -139,6 +208,7 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
       pcRef.current.close();
       pcRef.current = null;
     }
+    hostIdRef.current = null;
   }, []);
 
   return { handleOffer, handleIceCandidate, close, audioRef, remoteStreamRef };

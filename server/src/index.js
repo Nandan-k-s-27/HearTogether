@@ -49,7 +49,7 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000); // run every hour
 
-// Root route – confirms server is live
+// Root route - confirms server is live
 app.get('/', (_req, res) => {
   res.json({ service: 'HearTogether API', status: 'ok' });
 });
@@ -65,26 +65,43 @@ app.post('/api/rooms', createRoomLimiter, (_req, res) => {
   res.status(201).json(room);
 });
 
-// ICE server configuration — STUN + free public Open Relay TURN.
-// No private credentials needed; Open Relay handles NAT traversal for free.
+// TURN configuration (Metered.ca free plan)
+const TURN_URLS       = process.env.TURN_URLS;
+const TURN_USERNAME   = process.env.TURN_USERNAME;
+const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
+
+const hasTurn = Boolean(TURN_URLS && TURN_USERNAME && TURN_CREDENTIAL);
+
+if (!hasTurn) {
+  console.warn('');
+  console.warn('WARNING: No TURN relay configured - audio will NOT work on mobile/cellular.');
+  console.warn('  FREE option (no card): Metered.ca 0.5 GB/month free plan.');
+  console.warn('    1. Sign up at https://dashboard.metered.ca/signup');
+  console.warn('    2. Create an app -> TURN Credentials -> copy username, credential & URLs.');
+  console.warn('    3. Set env vars on Render: TURN_URLS, TURN_USERNAME, TURN_CREDENTIAL');
+  console.warn('');
+}
+
+const STUN_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+];
+
+// Returns STUN + Metered.ca TURN servers to clients.
 app.get('/api/ice-servers', (_req, res) => {
   res.setHeader('Cache-Control', 'private, max-age=300');
 
-  res.json({
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      // Port 3478 — standard TURN UDP port; lowest latency on mobile networks.
-      { urls: 'turn:openrelay.metered.ca:3478',                username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:3478?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
-      // Port 80 TCP — fallback when UDP 3478 is blocked.
-      { urls: 'turn:openrelay.metered.ca:80',                  username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:80?transport=tcp',    username: 'openrelayproject', credential: 'openrelayproject' },
-      // Port 443 TCP — last resort; almost never blocked.
-      { urls: 'turn:openrelay.metered.ca:443',                 username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443?transport=tcp',   username: 'openrelayproject', credential: 'openrelayproject' },
-    ],
-  });
+  const iceServers = [...STUN_SERVERS];
+
+  if (hasTurn) {
+    TURN_URLS.split(',').map((u) => u.trim()).filter(Boolean).forEach((url) => {
+      iceServers.push({ urls: url, username: TURN_USERNAME, credential: TURN_CREDENTIAL });
+    });
+  }
+
+  res.json({ iceServers });
 });
 
 // REST: get room info
@@ -95,7 +112,7 @@ app.get('/api/rooms/:code', (req, res) => {
   res.json({ id: room.id, code: room.code, hostConnected: room.hostConnected, listenerCount: room.listeners.size });
 });
 
-// ─── Socket.IO signaling ───────────────────────────────────────────────
+// Socket.IO signaling
 io.on('connection', (socket) => {
   console.log(`[socket] connected: ${socket.id}`);
 
@@ -103,8 +120,8 @@ io.on('connection', (socket) => {
   socket.on('host:join', ({ roomId }, cb) => {
     let room = getRoom(roomId);
     if (!room) {
-      // Room not in memory — server most likely restarted (Render free-tier
-      // spin-up wipes in-memory state).  Recreate the room with the same ID
+      // Room not in memory - server most likely restarted (Render free-tier
+      // spin-up wipes in-memory state). Recreate the room with the same ID
       // so the host's existing URL stays valid and listeners can still join.
       const created = createRoomWithId(roomId);
       room = getRoom(created.id);
@@ -141,7 +158,7 @@ io.on('connection', (socket) => {
     console.log(`[room ${room.code}] listener ${socket.id} joined (${room.listeners.size} total)`);
   });
 
-  // ─── WebRTC signaling ─────────────────────────────────────────
+  // WebRTC signaling
   socket.on('signal:offer', ({ to, offer }) => {
     io.to(to).emit('signal:offer', { from: socket.id, offer });
   });
@@ -154,7 +171,7 @@ io.on('connection', (socket) => {
     io.to(to).emit('signal:ice-candidate', { from: socket.id, candidate });
   });
 
-  // ─── Host controls ────────────────────────────────────────────
+  // Host controls
   socket.on('host:pause', () => {
     const { roomId } = socket.data;
     if (roomId) socket.to(roomId).emit('host:paused');
@@ -183,13 +200,13 @@ io.on('connection', (socket) => {
     if (listenerSocket) listenerSocket.leave(roomId);
   });
 
-  // ─── Sync: host broadcasts its timestamp periodically ─────────
+  // Sync: host broadcasts its timestamp periodically
   socket.on('sync:timestamp', ({ timestamp }) => {
     const { roomId } = socket.data;
     if (roomId) socket.to(roomId).emit('sync:timestamp', { timestamp, serverTime: Date.now() });
   });
 
-  // ─── Disconnect ───────────────────────────────────────────────
+  // Disconnect
   socket.on('disconnect', () => {
     const { role, roomId } = socket.data;
     if (!roomId) return;
@@ -199,7 +216,7 @@ io.on('connection', (socket) => {
     if (role === 'host') {
       io.to(roomId).emit('host:stopped');
       deleteRoom(roomId);
-      console.log(`[room ${room.code}] host disconnected – room closed`);
+      console.log(`[room ${room.code}] host disconnected - room closed`);
     } else if (role === 'listener') {
       removeListener(room.id, socket.id);
       if (room.hostSocketId) {
@@ -216,4 +233,6 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`HearTogether server listening on port ${PORT}`);
+  if (hasTurn) console.log('[TURN] provider: Metered.ca OK');
+  else         console.log('[TURN] WARNING: no relay configured - mobile audio will fail');
 });

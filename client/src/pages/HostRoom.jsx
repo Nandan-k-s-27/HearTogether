@@ -47,7 +47,7 @@ export default function HostRoom() {
     socket.emit('host:join', { roomId }, (res) => {
       if (res?.error) {
         alert(res.error);
-        navigate('/');
+        navigate('/', { replace: true });
         return;
       }
       setRoomCode(res.code);
@@ -67,7 +67,7 @@ export default function HostRoom() {
       socket.emit('host:join', { roomId }, (res) => {
         if (res?.error) {
           alert('Server restarted and could not recover your session. Please create a new room.');
-          navigate('/');
+          navigate('/', { replace: true });
           return;
         }
         // Server may have assigned a new code after the restart — update QR / display.
@@ -134,7 +134,9 @@ export default function HostRoom() {
       syncInterval.current = null;
     }
     socket.emit('host:stop');
-    navigate('/');
+    // replace: true removes /host/:roomId from history so pressing back from
+    // home does not re-mount this component and attempt to rejoin the room.
+    navigate('/', { replace: true });
   }, [navigate, closeAll]);
 
   // Keep the ref pointing at the latest handleStop so capture-time listeners
@@ -298,7 +300,7 @@ export default function HostRoom() {
                   shimmerColor="#5c7cfa"
                   className="dark:text-white flex-1 font-semibold"
                 >
-                  {paused ? '▶️ Resume' : '⏸️ Pause'}
+                  {paused ? 'Resume' : 'Pause'}
                 </ShimmerButton>
                 <ShimmerButton
                   onClick={handleStop}
@@ -306,7 +308,7 @@ export default function HostRoom() {
                   shimmerColor="#ffffff"
                   className="dark:text-white flex-1 font-semibold"
                 >
-                  ⏹️ Stop
+                  Stop
                 </ShimmerButton>
               </div>
             )}
