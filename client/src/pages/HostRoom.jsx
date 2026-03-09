@@ -22,6 +22,7 @@ export default function HostRoom() {
   const [listeners, setListeners] = useState([]);
   const [stream, setStream] = useState(null);
   const [iceServersConfig, setIceServersConfig] = useState(null);
+  const [captureError, setCaptureError] = useState(null);
 
   // Fetch TURN-capable ICE servers from backend as early as possible so they
   // are ready before the first listener joins and createOffer() is called.
@@ -144,11 +145,16 @@ export default function HostRoom() {
 
   // Start capturing audio
   const startCapture = useCallback(async (type) => {
+    setCaptureError(null);
     try {
       let mediaStream;
       if (type === 'mic') {
         mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       } else {
+        if (!navigator.mediaDevices?.getDisplayMedia) {
+          setCaptureError('Tab audio capture is not supported on this device. Open HearTogether on a desktop browser, or use Microphone mode instead.');
+          return;
+        }
         // getDisplayMedia — video is required by the API.
         // We do NOT stop video tracks here.  Stopping them early causes two problems:
         //  1. Chrome's "You are sharing [Tab X]" indicator may not close when the
@@ -191,7 +197,7 @@ export default function HostRoom() {
       }, 5000);
     } catch (err) {
       console.error('Capture failed:', err);
-      alert('Could not capture audio. Please ensure you grant the required permissions.');
+      setCaptureError('Could not capture audio. Please make sure you grant the required permissions and try again.');
     }
   }, []); // no external deps needed — everything is accessed via refs or stable socket
 
@@ -273,6 +279,12 @@ export default function HostRoom() {
           {/* Broadcast Controls */}
           <GlowCard customSize glowColor="purple" className="w-full">
             <h2 className="mb-4 text-lg font-semibold">Broadcast</h2>
+
+            {captureError && (
+              <div className="mb-3 rounded-lg border border-yellow-500/30 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-300">
+                {captureError}
+              </div>
+            )}
 
             {!streaming ? (
               <div className="flex flex-col gap-3">

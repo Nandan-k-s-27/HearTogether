@@ -24,9 +24,9 @@ const DEFAULT_ICE_SERVERS = {
 };
 
 // Log which ICE candidate types are gathered — helps diagnose whether TURN
-// relay candidates arrive.  Only fires in non-production for debugging.
+// relay candidates arrive.  Only active in dev builds.
 function logIceCandidate(label, candidate) {
-  if (!candidate) return;
+  if (!import.meta.env.DEV || !candidate) return;
   const c = candidate.candidate || '';
   const type = candidate.type || (c.includes('relay') ? 'relay' : c.includes('srflx') ? 'srflx' : 'host');
   console.log(`[ICE ${label}] ${type}: ${c.slice(0, 80)}`);
