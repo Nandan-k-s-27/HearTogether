@@ -1,24 +1,120 @@
 # HearTogether
 
-Real-time audio sharing over the web. One device broadcasts, everyone listens through their own headphones — no Bluetooth pairing, no extra hardware.
+Real-time audio sharing over the web. One device broadcasts, everyone listens through their own headphones — no Bluetooth pairing, no extra hardware required.
+
+---
+
+## Features
+
+- **Instant room creation** — unique 7-character code and QR code generated on demand
+- **Two audio capture modes** — Browser Tab Audio (`getDisplayMedia`) or Microphone (`getUserMedia`)
+- **WebRTC peer-to-peer audio** — low-latency streaming direct to every listener
+- **Host controls** — pause, resume, stop broadcast, and remove individual listeners
+- **Listener experience** — tap-to-play (browser autoplay compliant), live volume slider, color-coded WebRTC connection state badge
+- **QR code & copy link** — share the room instantly from the host dashboard
+- **Dark / Light theme** — toggle with `localStorage` persistence, defaults to dark
+- **No account required** — join by scanning a QR code or entering the room code
+- **Security hardened** — `helmet` security headers, CORS restriction, rate-limiting on room creation, input sanitisation, stale-room cleanup every hour
+- **Resilient reconnect** — host and listener automatically re-join their room after a socket reconnection or server restart
+- **Keep-alive pings** — prevents free-tier server spin-down (Render, Railway, etc.)
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, Vite 5, TailwindCSS 3 |
+| Routing | React Router v6 |
+| Real-time | Socket.IO 4 (signaling), WebRTC (audio transport) |
+| Audio capture | Web Audio API (`getDisplayMedia` / `getUserMedia`) |
+| UI components | `ShimmerButton`, `GlowCard` (spotlight), `InteractiveWavesBackground`, `ThemeToggle` |
+| QR code | `qrcode.react` |
+| CSS utilities | `clsx` + `tailwind-merge` |
+| Backend | Node.js, Express 4 |
+| Security | `helmet`, `cors`, `express-rate-limit` |
+| ID generation | `nanoid` |
+| TURN relay | Metered.ca (optional, via environment variables) |
+| Deployment | Vercel (frontend) + Render / Railway / Fly.io (backend) |
+
+---
+
+## Project Structure
+
+```
+HearTogether/
+├── client/                         # React + Vite frontend
+│   ├── public/
+│   ├── src/
+│   │   ├── App.jsx                 # Routes: /, /host/:roomId, /room/:code, /listen/:roomId
+│   │   ├── pages/
+│   │   │   ├── LandingPage.jsx     # Hero, create room, join by code
+│   │   │   ├── HostRoom.jsx        # Host dashboard — broadcast controls, QR, listener list
+│   │   │   ├── JoinPage.jsx        # Pre-join confirmation screen
+│   │   │   └── ListenerRoom.jsx    # Audio receiver — tap to play, volume, connection state
+│   │   ├── components/
+│   │   │   ├── InteractiveWavesBackground.jsx  # Full-page Perlin noise canvas
+│   │   │   └── ui/
+│   │   │       ├── shimmer-button.jsx  # Animated shimmer CTA button
+│   │   │       ├── spotlight-card.jsx  # Pointer-tracked glow card
+│   │   │       ├── docks.jsx           # DockBar wrapper (exports ThemeToggle)
+│   │   │       └── theme-toggle.jsx    # Dark / light toggle (localStorage)
+│   │   ├── hooks/
+│   │   │   └── useWebRTC.js        # useHostWebRTC + useListenerWebRTC
+│   │   ├── services/
+│   │   │   ├── api.js              # createRoom, getRoomInfo, getIceServers, pingServer
+│   │   │   └── socket.js           # Singleton Socket.IO client
+│   │   ├── lib/
+│   │   │   └── utils.js            # cn() — clsx + tailwind-merge
+│   │   └── index.css               # Tailwind directives, GlowCard CSS, pulse-ring animation
+│   ├── index.html
+│   ├── vite.config.js              # Path alias @→src, dev proxy → localhost:3001
+│   ├── tailwind.config.js          # Custom brand palette, shimmer keyframes
+│   ├── vercel.json                 # SPA rewrite: /* → /index.html
+│   └── package.json
+├── server/                         # Node.js + Express backend
+│   ├── src/
+│   │   ├── index.js                # Express REST API + Socket.IO event handlers
+│   │   └── rooms.js                # In-memory room store (Map-based)
+│   └── package.json
+├── LICENSE
+└── README.md
+```
+
+---
 
 ## Quick Start
 
-### 1. Configure environment variables
+### 1. Install dependencies
 
 ```bash
-# Server
-cp server/.env.example server/.env
+# Backend
+cd server
+npm install
 
-# Client (optional — defaults to localhost:3001)
-cp client/.env.example client/.env
+# Frontend
+cd ../client
+npm install
 ```
 
-### 2. Install dependencies
+### 2. Configure environment variables
 
-```bash
-cd server && npm install
-cd ../client && npm install
+**Server** — create `server/.env`:
+
+```env
+PORT=3001
+FRONTEND_URL=http://localhost:5173
+
+# Optional — TURN relay (Metered.ca)
+# TURN_URLS=turn:relay.metered.ca:80
+# TURN_USERNAME=your_username
+# TURN_CREDENTIAL=your_credential
+```
+
+**Client** — create `client/.env` (only needed for production; dev uses the Vite proxy):
+
+```env
+VITE_SERVER_URL=https://your-server.onrender.com
 ```
 
 ### 3. Run the development servers
@@ -35,99 +131,95 @@ cd client
 npm run dev
 ```
 
-The frontend runs at `http://localhost:5173` and proxies API/WebSocket calls to the backend on port `3001`.
+The frontend runs at `http://localhost:5173` and automatically proxies `/api` and `/socket.io` requests to the backend on port `3001`.
 
-### Production build
+### 4. Production build
 
 ```bash
 cd client
-npm run build   # outputs to client/dist/
+npm run build   # output → client/dist/
 ```
 
-### Deploying to Vercel + a Node host (e.g., Render / Railway)
+---
 
-**Frontend (Vercel):**
+## Deployment
+
+### Frontend — Vercel
+
 1. Set the **Root Directory** to `client/` in your Vercel project settings.
-2. Add the environment variable `VITE_SERVER_URL=https://your-server.onrender.com` (no trailing slash).
-3. The included `client/vercel.json` already configures the SPA rewrites so deep links (QR codes, room links) work correctly.
+2. Add the environment variable:
+   ```
+   VITE_SERVER_URL=https://your-server.onrender.com
+   ```
+3. The included `client/vercel.json` handles SPA rewrites so QR code deep links resolve correctly.
 
-**Backend (Render / Railway / Fly.io …):**
-1. Deploy the `server/` directory.
-2. Set `FRONTEND_URL=https://your-heartogether.vercel.app` (no trailing slash) in the server's environment variables.
-3. Set `PORT` to whatever the host assigns (or leave it to the host to inject).
+### Backend — Render / Railway / Fly.io
+
+1. Deploy the `server/` directory as a Node.js service.
+2. Set the environment variables:
+   ```
+   FRONTEND_URL=https://your-heartogether.vercel.app
+   PORT=<assigned by host>
+   ```
+
+---
 
 ## How It Works
 
-1. **Host** opens the app and clicks **Create Room**.
-2. A unique room code and QR code are generated.
-3. **Listeners** scan the QR code or enter the room code to join.
-4. The host starts broadcasting audio (browser tab, screen, or microphone).
-5. Audio is streamed peer-to-peer to all listeners via **WebRTC**.
-6. A timestamp-based sync system keeps playback aligned across devices.
+1. **Host** clicks **Create Room** — the server generates a unique room ID and 7-character code.
+2. Host shares the QR code or room code with listeners.
+3. **Listeners** scan or enter the code — a confirmation screen shows the room is live.
+4. Host selects an audio source (Browser Tab or Microphone) and starts broadcasting.
+5. For each listener that joins, the host creates a WebRTC offer; the listener answers. Audio flows peer-to-peer.
+6. Signaling (offers, answers, ICE candidates) is relayed through Socket.IO — no audio ever touches the server.
+7. Host can pause, resume, stop the broadcast, or remove individual listeners at any time.
 
-## Tech Stack
+---
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React 18, Vite 5, TailwindCSS 3 |
-| UI Components | ShimmerButton, GlowCard (spotlight-card), DockBar theme switcher |
-| Backend | Node.js, Express, Socket.io 4 |
-| Streaming | WebRTC, Web Audio API |
-| QR Code | qrcode.react |
-| Routing | React Router v6 |
-| Security | helmet, express-rate-limit |
+## Environment Variables Reference
 
-## Project Structure
+### Server
 
-```
-HearTogether/
-├── client/                    # React + Vite frontend
-│   ├── src/
-│   │   ├── components/ui/     # shimmer-button, spotlight-card, docks
-│   │   ├── lib/utils.js       # cn() — clsx + tailwind-merge
-│   │   ├── pages/             # LandingPage, HostRoom, ListenerRoom, JoinPage
-│   │   ├── hooks/             # useHostWebRTC, useListenerWebRTC
-│   │   ├── services/          # socket.js, api.js
-│   │   └── App.jsx
-│   ├── .env.example
-│   └── package.json
-├── server/                    # Node.js + Express backend
-│   ├── src/
-│   │   ├── index.js           # Express + Socket.io server
-│   │   └── rooms.js           # In-memory room management
-│   ├── .env.example
-│   └── package.json
-├── .gitignore
-└── README.md
-```
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `3001` | HTTP / WebSocket server port |
+| `FRONTEND_URL` | `http://localhost:5173` | Allowed CORS origin(s), comma-separated |
+| `TURN_URLS` | — | Comma-separated TURN server URLs |
+| `TURN_USERNAME` | — | TURN username |
+| `TURN_CREDENTIAL` | — | TURN password |
 
-## Features
+### Client
 
-- **Room creation** with unique 7-character code & QR code
-- **3 audio capture modes**: browser tab, screen share, microphone
-- **Real-time WebRTC** peer-to-peer audio to all listeners
-- **Room controls**: pause, resume, stop, remove individual listeners
-- **Listener view**: volume control, connection quality indicator, sync offset display
-- **Automatic Sync**: Real-time synchronization between host and listeners
-- **Session Security**: Rate limiting for room creation and CORS protection
+| Variable | Default | Description |
+|---|---|---|
+| `VITE_SERVER_URL` | `''` (empty) | Backend base URL in production |
+
+---
+
+## API Reference
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/rooms` | Create a new room; rate-limited to 30 requests / 10 min per IP |
+| `GET` | `/api/rooms/:code` | Get room info (`id`, `code`, `hostConnected`, `listenerCount`) |
+| `GET` | `/api/ice-servers` | Returns STUN + optional TURN server config |
+| `GET` | `/api/health` | Keep-alive ping |
+
+---
 
 ## Troubleshooting
 
 ### "Room not found or has ended"
-- Ensure the Host has not closed the room.
-- Check if you entered the code correctly. Codes are case-insensitive.
-- If using a link, ensure it follows the format `/room/CODE`.
+- Confirm the host has not stopped the room.
+- Room codes are case-insensitive — double-check the code.
+- If following a direct link, make sure it uses the format `/room/CODE`.
 
-### "No audio heard as a Listener"
-- The host must select an audio source (Tab, Screen, or Mic) and click "Start".
-- Ensure you have granted microphone/screen permissions if you are the host.
-- Some browsers require a user interaction (like clicking "Start Listening") before playing audio.
+### No audio in the listener view
+- The host must choose an audio source (Tab or Mic) and click **Start Broadcasting**.
+- Browsers require a user gesture before playing audio — tap the **Tap to Hear** button.
+- Check that the browser has been granted screen/microphone permissions if you are the host.
 
-### "Screen sharing doesn't stop"
-- If the host stops sharing via the browser's "Stop sharing" button, the room will now correctly detect this and end the session.
-- You can also click the "Stop" button within the HearTogether interface.
-- **Light / System / Dark** theme switcher with OS-preference sync and localStorage persistence
-- **No account required** — join by QR scan or room code
-- **Security hardened**: HTTP security headers (helmet), rate-limiting on room creation, input sanitisation, stale-room cleanup
-- **Responsive** TailwindCSS UI
+### Host's "Stop sharing" button ends the session
+- This is intentional. When the browser's native stop-sharing button is clicked, HearTogether detects the stream ending and cleanly closes the room.
+- To pause without ending the room, use the **Pause** button inside HearTogether instead.
 
