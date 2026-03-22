@@ -9,7 +9,7 @@ const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const { createRoom, createRoomWithId, getRoom, deleteRoom, addListener, removeListener, getRoomByCode, getAllRooms } = require('./rooms');
-const { createToken, verifyToken, authMiddleware, getOrCreateUser, getUserByGoogleId } = require('./auth');
+const { createToken, verifyToken, authMiddleware, getOrCreateUser } = require('./auth');
 
 const app = express();
 const server = http.createServer(app);
@@ -37,7 +37,6 @@ app.use(cookieParser());
 
 // Initialize Passport authentication middleware
 app.use(passport.initialize());
-app.use(passport.session());
 
 // Configure Passport Google OAuth Strategy
 passport.use(
@@ -58,11 +57,11 @@ passport.use(
   )
 );
 
-passport.serializeUser((user, done) => done(null, user.googleId));
-passport.deserializeUser((googleId, done) => {
-  const user = getUserByGoogleId(googleId);
-  done(null, user || null);
-});
+function getFrontendRedirectUrl() {
+  const raw = process.env.FRONTEND_URL || 'http://localhost:5173';
+  // FRONTEND_URL may be comma-separated for CORS; use the first entry for redirects.
+  return raw.split(',').map((s) => s.trim()).filter(Boolean)[0] || 'http://localhost:5173';
+}
 
 const createRoomLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
@@ -97,21 +96,24 @@ app.get('/api/health', (_req, res) => {
 // AUTH ROUTES
 
 // Start Google OAuth flow
-app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+app.get('/auth/google', passport.authenticate('google', {
+  scope: ['profile', 'email'],
+  session: false,
+}));
 
 // Google OAuth callback
 app.get(
   '/auth/google/callback',
-  passport.authenticate('google', { failureRedirect: '/auth/failed' }),
+  passport.authenticate('google', { failureRedirect: '/auth/failed', session: false }),
   (req, res) => {
     // User authenticated successfully
     if (req.user) {
       const token = createToken(req.user);
       // Redirect to frontend with token in query (frontend will store in cookie)
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const frontendUrl = getFrontendRedirectUrl();
       res.redirect(`${frontendUrl}?auth_token=${token}`);
     } else {
-      res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}?auth_error=failed`);
+      res.redirect(`${getFrontendRedirectUrl()}?auth_error=failed`);
     }
   }
 );
