@@ -3,13 +3,16 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getRoomInfo } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
+import { useAuth } from '../context/AuthContext';
 
 export default function JoinPage() {
   const { code } = useParams();
   const navigate = useNavigate();
+  const { user, login } = useAuth();
   const [room, setRoom] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [authHint, setAuthHint] = useState('');
 
   useEffect(() => {
     if (!code) return;
@@ -24,6 +27,10 @@ export default function JoinPage() {
   }, [code]);
 
   const handleJoin = () => {
+    if (!user) {
+      setAuthHint('Please sign in to start listening.');
+      return;
+    }
     // Always navigate with the room CODE. ListenerRoom sends it to the server
     // which looks up the room by code (getRoomByCode).
     navigate(`/listen/${code.trim().toUpperCase()}`);
@@ -71,6 +78,16 @@ export default function JoinPage() {
           >
             Start Listening
           </ShimmerButton>
+          {authHint && !user && (
+            <div className="mt-3 rounded-lg border border-yellow-500/30 bg-yellow-900/20 px-3 py-2 text-xs text-yellow-300">
+              <div className="flex items-center justify-center gap-2">
+                <span>{authHint}</span>
+                <button onClick={() => login()} className="underline underline-offset-2">
+                  Sign In
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </GlowCard>
       <button onClick={() => navigate('/')} className="text-sm text-gray-500 hover:text-white transition">

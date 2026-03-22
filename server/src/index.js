@@ -99,10 +99,14 @@ app.get('/api/health', (_req, res) => {
 // AUTH ROUTES
 
 // Start Google OAuth flow
-app.get('/auth/google', passport.authenticate('google', {
-  scope: ['profile', 'email'],
-  session: false,
-}));
+app.get('/auth/google', (req, res, next) => {
+  const prompt = req.query.prompt === 'select_account' ? 'select_account' : undefined;
+  passport.authenticate('google', {
+    scope: ['profile', 'email'],
+    session: false,
+    prompt,
+  })(req, res, next);
+});
 
 // Google OAuth callback
 app.get(

@@ -38,14 +38,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <LandingPage />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/" element={<LandingPage />} />
       <Route
         path="/host/:roomId"
         element={
@@ -54,14 +47,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/room/:code"
-        element={
-          <ProtectedRoute>
-            <JoinPage />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/room/:code" element={<JoinPage />} />
       <Route
         path="/listen/:roomId"
         element={

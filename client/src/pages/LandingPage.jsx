@@ -6,13 +6,20 @@ import { Component as DockBar } from '../components/ui/docks';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 import { UserProfile } from '../components/UserProfile';
+import { useAuth } from '../context/AuthContext';
 
 export default function LandingPage() {
   const navigate = useNavigate();
+  const { user, login } = useAuth();
   const [joinCode, setJoinCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [authHint, setAuthHint] = useState('');
 
   const handleCreate = async () => {
+    if (!user) {
+      setAuthHint('Please sign in to create a room.');
+      return;
+    }
     setLoading(true);
     try {
       const { id } = await createRoom();
@@ -26,6 +33,10 @@ export default function LandingPage() {
 
   const handleJoin = (e) => {
     e.preventDefault();
+    if (!user) {
+      setAuthHint('Please sign in to join a room.');
+      return;
+    }
     const code = joinCode.trim().toUpperCase();
     if (code) navigate(`/room/${code}`);
   };
@@ -99,6 +110,20 @@ export default function LandingPage() {
             </ShimmerButton>
           </form>
         </div>
+
+        {authHint && !user && (
+          <div className="mt-4 rounded-xl border border-yellow-500/30 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-300">
+            <div className="flex items-center gap-3">
+              <span>{authHint}</span>
+              <button
+                onClick={() => login()}
+                className="rounded-md bg-yellow-400/20 px-3 py-1 text-yellow-200 hover:bg-yellow-400/30 transition"
+              >
+                Sign In
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* How it works */}
         <section className="mt-24 w-full max-w-4xl">

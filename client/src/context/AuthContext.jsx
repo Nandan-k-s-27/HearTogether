@@ -81,9 +81,15 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const login = () => {
-    // Use the BACKEND_URL from component scope
-    window.location.href = `${BACKEND_URL}/auth/google`;
+  const login = ({ prompt } = {}) => {
+    const qp = prompt ? `?prompt=${encodeURIComponent(prompt)}` : '';
+    window.location.href = `${BACKEND_URL}/auth/google${qp}`;
+  };
+
+  const switchAccount = () => {
+    localStorage.removeItem('auth_token');
+    setUser(null);
+    login({ prompt: 'select_account' });
   };
 
   const logout = async () => {
@@ -105,7 +111,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, error, login, logout, BACKEND_URL }}>
+    <AuthContext.Provider value={{ user, loading, error, login, logout, switchAccount, BACKEND_URL }}>
       {children}
     </AuthContext.Provider>
   );
