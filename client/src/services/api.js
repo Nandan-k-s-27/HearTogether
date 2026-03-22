@@ -24,6 +24,15 @@ const api = axios.create({
   withCredentials: true, // Include cookies with requests
 });
 
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export async function createRoom() {
   try {
     const res = await api.post('/rooms');

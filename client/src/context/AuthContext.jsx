@@ -18,6 +18,8 @@ export function AuthProvider({ children }) {
     return url || 'https://heartogether.onrender.com';
   })();
 
+  const getStoredToken = () => localStorage.getItem('auth_token');
+
   // Debug: Log the backend URL being used (remove in production)
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -30,8 +32,15 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const checkAuth = async () => {
       try {
+        const token = getStoredToken();
+        if (!token) {
+          setUser(null);
+          setLoading(false);
+          return;
+        }
         const response = await axios.get(`${BACKEND_URL}/auth/status`, {
           withCredentials: true,
+          headers: { Authorization: `Bearer ${token}` },
         });
         if (response.data.authenticated) {
           setUser(response.data.user);
@@ -56,8 +65,8 @@ export function AuthProvider({ children }) {
     const authError = params.get('auth_error');
 
     if (token) {
-      // Store token in httpOnly cookie via axios
-      document.cookie = `auth_token=${token}; path=/; max-age=604800; SameSite=Strict`;
+      // Persist token on frontend origin for cross-domain API auth.
+      localStorage.setItem('auth_token', token);
       
       // Parse token to get user info (basic JWT decode)
       const payload = JSON.parse(atob(token.split('.')[1]));
@@ -80,9 +89,17 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try {
-      await axios.post(`${BACKEND_URL}/auth/logout`, {}, { withCredentials: true });
+      const token = getStoredToken();
+      await axios.post(
+        `${BACKEND_URL}/auth/logout`,
+        {},
+        {
+          withCredentials: true,
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        },
+      );
       setUser(null);
-      document.cookie = 'auth_token=; path=/; max-age=0';
+      localStorage.removeItem('auth_token');
     } catch (err) {
       console.error('Logout failed:', err);
     }

@@ -130,7 +130,7 @@ app.get('/auth/me', authMiddleware, (req, res) => {
 
 // Check if user is authenticated
 app.get('/auth/status', (req, res) => {
-  const token = req.cookies?.auth_token;
+  const token = req.cookies?.auth_token || req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.json({ authenticated: false });
 
   const user = verifyToken(token);
