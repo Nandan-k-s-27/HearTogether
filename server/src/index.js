@@ -262,6 +262,8 @@ io.on('connection', (socket) => {
     // Notify host about new listener
     io.to(room.hostSocketId).emit('listener:joined', {
       listenerId: socket.id,
+      listenerEmail: socket.user?.email || null,
+      listenerName: socket.user?.email ? socket.user.email.split('@')[0] : (socket.user?.name || null),
       listenerCount: room.listeners.size,
     });
 

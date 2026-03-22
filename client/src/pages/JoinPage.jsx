@@ -82,7 +82,10 @@ export default function JoinPage() {
             <div className="mt-3 rounded-lg border border-yellow-500/30 bg-yellow-900/20 px-3 py-2 text-xs text-yellow-300">
               <div className="flex items-center justify-center gap-2">
                 <span>{authHint}</span>
-                <button onClick={() => login()} className="underline underline-offset-2">
+                <button
+                  onClick={() => login({ returnTo: `/listen/${code.trim().toUpperCase()}` })}
+                  className="underline underline-offset-2"
+                >
                   Sign In
                 </button>
               </div>

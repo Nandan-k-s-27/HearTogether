@@ -71,6 +71,13 @@ export function AuthProvider({ children }) {
       const payload = JSON.parse(atob(token.split('.')[1]));
       setUser(payload);
       
+      const returnTo = localStorage.getItem('post_auth_redirect');
+      if (returnTo) {
+        localStorage.removeItem('post_auth_redirect');
+        window.location.assign(returnTo);
+        return;
+      }
+
       // Clean URL
       window.history.replaceState({}, document.title, window.location.pathname);
     }
@@ -81,7 +88,11 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const login = ({ prompt } = {}) => {
+  const login = ({ prompt, returnTo } = {}) => {
+    if (returnTo) {
+      localStorage.setItem('post_auth_redirect', returnTo);
+    }
+
     const qp = prompt ? `?prompt=${encodeURIComponent(prompt)}` : '';
     window.location.href = `${BACKEND_URL}/auth/google${qp}`;
   };

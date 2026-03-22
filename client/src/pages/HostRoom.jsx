@@ -89,10 +89,15 @@ export default function HostRoom() {
 
   // Listen for signaling events
   useEffect(() => {
-    const onListenerJoined = ({ listenerId }) => {
+    const onListenerJoined = ({ listenerId, listenerEmail, listenerName }) => {
       setListeners((prev) => {
         if (prev.some((l) => l.id === listenerId)) return prev;
-        return [...prev, { id: listenerId, joinedAt: Date.now() }];
+        return [...prev, {
+          id: listenerId,
+          email: listenerEmail || null,
+          name: listenerName || null,
+          joinedAt: Date.now(),
+        }];
       });
       if (stream) createOffer(listenerId);
     };
@@ -351,7 +356,10 @@ export default function HostRoom() {
                   <li key={l.id} className="flex items-center justify-between rounded-lg bg-white/5 px-4 py-2">
                     <div className="flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full bg-green-500" />
-                      <span className="text-sm font-mono">{l.id.slice(0, 8)}…</span>
+                      <div className="text-left">
+                        <div className="text-sm font-semibold">{l.name || l.email || `${l.id.slice(0, 8)}…`}</div>
+                        {l.email && <div className="text-xs text-gray-400">{l.email}</div>}
+                      </div>
                     </div>
                     <button
                       onClick={() => handleRemoveListener(l.id)}
