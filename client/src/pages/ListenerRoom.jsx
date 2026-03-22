@@ -52,7 +52,7 @@ export default function ListenerRoom() {
       el.srcObject = remoteStreamRef.current;
       el.muted = false;
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [audioRef, remoteStreamRef]);
 
   // Called by the "Tap to Hear" button — runs inside a real user-gesture context
   // so audio.play() is guaranteed to succeed on all mobile browsers.

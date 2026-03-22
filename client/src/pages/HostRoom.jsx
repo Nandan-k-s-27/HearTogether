@@ -8,8 +8,7 @@ import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 
 const CAPTURE_OPTIONS = [
-  { id: 'tab', label: 'Browser Tab Audio', desc: 'Capture audio from a browser tab (recommended)' },
-  { id: 'window', label: 'Window/Screen + Audio', desc: 'Share any window or screen with system audio (media players, etc.)' },
+  { id: 'display', label: 'System Audio (Tab / Window / Screen)', desc: 'Share audio from a browser tab, app window, or entire screen' },
   { id: 'mic', label: 'Microphone', desc: 'Broadcast live microphone input' },
 ];
 
@@ -151,7 +150,7 @@ export default function HostRoom() {
       let mediaStream;
       if (type === 'mic') {
         mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      } else if (type === 'tab' || type === 'window') {
+      } else if (type === 'display') {
         if (!navigator.mediaDevices?.getDisplayMedia) {
           setCaptureError('Display capture is not supported on this device. Open HearTogether on a desktop browser, or use Microphone mode instead.');
           return;
@@ -174,10 +173,15 @@ export default function HostRoom() {
             noiseSuppression: false,
             autoGainControl: false,
           },
-          preferCurrentTab: type === 'tab',
-          // For window capture, allow capturing from any window/screen
-          displaySurface: type === 'window' ? 'window' : undefined,
+          // Browser picker still lets host choose tab/window/screen explicitly.
+          preferCurrentTab: false,
         });
+
+        if (mediaStream.getAudioTracks().length === 0) {
+          mediaStream.getTracks().forEach((track) => track.stop());
+          setCaptureError('No system audio was selected. Start again and enable the Share audio checkbox in the browser picker.');
+          return;
+        }
       }
 
       // Wire onended to EVERY track so that:
@@ -195,6 +199,7 @@ export default function HostRoom() {
       setStreaming(true);
       setPaused(false);
 
+      if (syncInterval.current) clearInterval(syncInterval.current);
       syncInterval.current = setInterval(() => {
         socket.emit('sync:timestamp', { timestamp: Date.now() });
       }, 5000);
@@ -209,7 +214,7 @@ export default function HostRoom() {
     if (stream && listeners.length > 0) {
       listeners.forEach((l) => createOffer(l.id));
     }
-  }, [stream]); // intentionally only re-run when stream changes
+  }, [stream, listeners, createOffer]);
 
   const handlePause = () => {
     if (paused) {

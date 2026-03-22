@@ -89,12 +89,20 @@ export function useHostWebRTC(socket, stream, iceServersConfig) {
 
   const handleAnswer = useCallback((listenerId, answer) => {
     const pc = peers.current.get(listenerId);
-    if (pc) pc.setRemoteDescription(new RTCSessionDescription(answer));
+    if (pc) {
+      pc.setRemoteDescription(new RTCSessionDescription(answer)).catch((err) => {
+        console.error('[WebRTC] failed to set remote answer:', err);
+      });
+    }
   }, []);
 
   const handleIceCandidate = useCallback((listenerId, candidate) => {
     const pc = peers.current.get(listenerId);
-    if (pc) pc.addIceCandidate(new RTCIceCandidate(candidate));
+    if (pc) {
+      pc.addIceCandidate(new RTCIceCandidate(candidate)).catch((err) => {
+        console.error('[WebRTC] failed to add host ICE candidate:', err);
+      });
+    }
   }, []);
 
   const removePeer = useCallback((listenerId) => {
@@ -200,7 +208,11 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
   );
 
   const handleIceCandidate = useCallback((_fromId, candidate) => {
-    if (pcRef.current) pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+    if (pcRef.current) {
+      pcRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch((err) => {
+        console.error('[WebRTC] failed to add listener ICE candidate:', err);
+      });
+    }
   }, []);
 
   const close = useCallback(() => {
