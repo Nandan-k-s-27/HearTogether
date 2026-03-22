@@ -39,7 +39,6 @@ export function AuthProvider({ children }) {
           return;
         }
         const response = await axios.get(`${BACKEND_URL}/auth/status`, {
-          withCredentials: true,
           headers: { Authorization: `Bearer ${token}` },
         });
         if (response.data.authenticated) {

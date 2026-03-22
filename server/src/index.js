@@ -25,13 +25,16 @@ const corsOptions = {
     if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
     cb(new Error(`CORS blocked: ${origin}`));
   },
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
 const io = new Server(server, { cors: corsOptions });
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10kb' }));
 app.use(cookieParser());
 
