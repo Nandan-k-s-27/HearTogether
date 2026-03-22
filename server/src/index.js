@@ -35,6 +35,10 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '10kb' }));
 app.use(cookieParser());
 
+// Initialize Passport authentication middleware
+app.use(passport.initialize());
+app.use(passport.session());
+
 // Configure Passport Google OAuth Strategy
 passport.use(
   new GoogleStrategy(
