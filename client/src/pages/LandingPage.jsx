@@ -5,6 +5,7 @@ import InteractiveWavesBackground from '../components/InteractiveWavesBackground
 import { Component as DockBar } from '../components/ui/docks';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
+import { UserProfile } from '../components/UserProfile';
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -51,7 +52,10 @@ export default function LandingPage() {
         <div className="flex items-center gap-2 text-xl font-bold">
           HearTogether
         </div>
-        <DockBar />
+        <div className="flex items-center gap-6">
+          <UserProfile />
+          <DockBar />
+        </div>
       </nav>
 
       {/* Hero */}

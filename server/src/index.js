@@ -1,10 +1,15 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const cookieParser = require('cookie-parser');
+const passport = require('passport');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const { createRoom, createRoomWithId, getRoom, deleteRoom, addListener, removeListener, getRoomByCode, getAllRooms } = require('./rooms');
+const { createToken, verifyToken, authMiddleware, getOrCreateUser, getUserByGoogleId } = require('./auth');
 
 const app = express();
 const server = http.createServer(app);
@@ -28,6 +33,32 @@ const io = new Server(server, { cors: corsOptions });
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10kb' }));
+app.use(cookieParser());
+
+// Configure Passport Google OAuth Strategy
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/auth/google/callback',
+    },
+    (accessToken, refreshToken, profile, done) => {
+      try {
+        const user = getOrCreateUser(profile);
+        return done(null, user);
+      } catch (err) {
+        return done(err);
+      }
+    }
+  )
+);
+
+passport.serializeUser((user, done) => done(null, user.googleId));
+passport.deserializeUser((googleId, done) => {
+  const user = getUserByGoogleId(googleId);
+  done(null, user || null);
+});
 
 const createRoomLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 minutes
@@ -59,8 +90,59 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-// REST: create room
-app.post('/api/rooms', createRoomLimiter, (_req, res) => {
+// AUTH ROUTES
+
+// Start Google OAuth flow
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+
+// Google OAuth callback
+app.get(
+  '/auth/google/callback',
+  passport.authenticate('google', { failureRedirect: '/auth/failed' }),
+  (req, res) => {
+    // User authenticated successfully
+    if (req.user) {
+      const token = createToken(req.user);
+      // Redirect to frontend with token in query (frontend will store in cookie)
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      res.redirect(`${frontendUrl}?auth_token=${token}`);
+    } else {
+      res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}?auth_error=failed`);
+    }
+  }
+);
+
+// Authentication failed redirect
+app.get('/auth/failed', (_req, res) => {
+  res.status(401).json({ error: 'Authentication failed' });
+});
+
+// Get current user profile
+app.get('/auth/me', authMiddleware, (req, res) => {
+  res.json(req.user);
+});
+
+// Check if user is authenticated
+app.get('/auth/status', (req, res) => {
+  const token = req.cookies?.auth_token;
+  if (!token) return res.json({ authenticated: false });
+
+  const user = verifyToken(token);
+  if (user) {
+    res.json({ authenticated: true, user });
+  } else {
+    res.json({ authenticated: false });
+  }
+});
+
+// Logout
+app.post('/auth/logout', (req, res) => {
+  res.clearCookie('auth_token');
+  res.json({ ok: true });
+});
+
+// REST: create room (requires authentication)
+app.post('/api/rooms', authMiddleware, createRoomLimiter, (_req, res) => {
   const room = createRoom();
   res.status(201).json(room);
 });
@@ -112,9 +194,24 @@ app.get('/api/rooms/:code', (req, res) => {
   res.json({ id: room.id, code: room.code, hostConnected: room.hostConnected, listenerCount: room.listeners.size });
 });
 
-// Socket.IO signaling
+// Socket.IO signaling - with authentication middleware
+io.use((socket, next) => {
+  const token = socket.handshake.auth.token || socket.handshake.headers.cookie?.split('auth_token=')[1]?.split(';')[0];
+  if (!token) {
+    return next(new Error('No authentication token'));
+  }
+  
+  const user = verifyToken(token);
+  if (!user) {
+    return next(new Error('Invalid or expired token'));
+  }
+
+  socket.user = user;
+  next();
+});
+
 io.on('connection', (socket) => {
-  console.log(`[socket] connected: ${socket.id}`);
+  console.log(`[socket] connected: ${socket.id} (user: ${socket.user.email})`);
 
   // Host joins room
   socket.on('host:join', ({ roomId }, cb) => {

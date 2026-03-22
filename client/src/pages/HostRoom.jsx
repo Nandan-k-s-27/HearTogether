@@ -6,6 +6,7 @@ import { useHostWebRTC } from '../hooks/useWebRTC';
 import { getIceServers, pingServer } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
+import { UserProfile } from '../components/UserProfile';
 
 const CAPTURE_OPTIONS = [
   { id: 'display', label: 'System Audio (Tab / Window / Screen)', desc: 'Share audio from a browser tab, app window, or entire screen' },
@@ -241,15 +242,18 @@ export default function HostRoom() {
       {/* Header */}
       <header className="mb-8 flex items-center justify-between">
         <h1 className="text-2xl font-bold">HearTogether</h1>
-        {streaming && (
-          <div className="flex items-center gap-2 text-sm">
-            <span className="relative flex h-3 w-3">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-              <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />
-            </span>
-            LIVE
-          </div>
-        )}
+        <div className="flex items-center gap-6">
+          {streaming && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="relative flex h-3 w-3">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />
+              </span>
+              LIVE
+            </div>
+          )}
+          <UserProfile />
+        </div>
       </header>
 
       <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-2">
