@@ -8,7 +8,23 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+  // Ensure BACKEND_URL is consistent - read once and use everywhere
+  const BACKEND_URL = (() => {
+    const url = import.meta.env.VITE_BACKEND_URL;
+    // Only use localhost fallback in development (when running on localhost)
+    if (!url && window.location.hostname === 'localhost') {
+      return 'http://localhost:3001';
+    }
+    return url || 'https://heartogether.onrender.com';
+  })();
+
+  // Debug: Log the backend URL being used (remove in production)
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log('[Auth] BACKEND_URL:', BACKEND_URL);
+      console.log('[Auth] VITE_BACKEND_URL env:', import.meta.env.VITE_BACKEND_URL);
+    }
+  }, [BACKEND_URL]);
 
   // Check if user is authenticated on mount or when token changes
   useEffect(() => {
@@ -31,7 +47,7 @@ export function AuthProvider({ children }) {
     };
 
     checkAuth();
-  }, []);
+  }, [BACKEND_URL]);
 
   // Handle OAuth callback from Google (redirect with token in URL)
   useEffect(() => {
@@ -58,7 +74,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = () => {
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+    // Use the BACKEND_URL from component scope
     window.location.href = `${BACKEND_URL}/auth/google`;
   };
 
@@ -73,7 +89,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, error, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, error, login, logout, BACKEND_URL }}>
       {children}
     </AuthContext.Provider>
   );

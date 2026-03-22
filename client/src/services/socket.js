@@ -1,6 +1,20 @@
 import { io } from 'socket.io-client';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+// Derive socket server URL from VITE_BACKEND_URL
+// In production: VITE_BACKEND_URL should be set in Vercel env vars
+// In dev: falls back to localhost only if running on localhost
+const BACKEND_URL = (() => {
+  const url = import.meta.env.VITE_BACKEND_URL;
+  if (!url && (typeof window !== 'undefined' && window.location.hostname === 'localhost')) {
+    return 'http://localhost:3001';
+  }
+  return url || 'https://heartogether.onrender.com';
+})();
+
+// Log in development
+if (import.meta.env.DEV) {
+  console.log('[Socket] BACKEND_URL:', BACKEND_URL);
+}
 
 const socket = io(BACKEND_URL, {
   autoConnect: false,

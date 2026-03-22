@@ -1,10 +1,22 @@
 import axios from 'axios';
 
-// Derive API base from the same VITE_BACKEND_URL used for socket.io.
-// In dev, requests go directly to localhost:3001
-// In production, VITE_BACKEND_URL must be set to the deployed backend URL.
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+// Derive API base from VITE_BACKEND_URL
+// In production: VITE_BACKEND_URL should be set in Vercel env vars
+// In dev: falls back to localhost only if running on localhost
+const BACKEND_URL = (() => {
+  const url = import.meta.env.VITE_BACKEND_URL;
+  if (!url && (typeof window !== 'undefined' && window.location.hostname === 'localhost')) {
+    return 'http://localhost:3001';
+  }
+  return url || 'https://heartogether.onrender.com';
+})();
+
 const API_BASE = `${BACKEND_URL}/api`;
+
+// Log in development
+if (import.meta.env.DEV) {
+  console.log('[API] BACKEND_URL:', BACKEND_URL);
+}
 
 // Create axios instance with default config
 const api = axios.create({
