@@ -59,11 +59,11 @@ export default function LandingPage() {
       />
 
       {/* Nav */}
-      <nav className="relative z-10 flex items-center justify-between px-6 py-4 md:px-12">
+      <nav className="relative z-10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 py-4 md:px-12">
         <div className="flex items-center gap-2 text-xl font-bold">
           HearTogether
         </div>
-        <div className="flex items-center gap-6">
+        <div className="flex w-full sm:w-auto items-center justify-end gap-2 sm:gap-4 flex-wrap">
           <UserProfile />
           <DockBar />
         </div>

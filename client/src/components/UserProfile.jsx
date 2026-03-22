@@ -10,7 +10,7 @@ export function UserProfile() {
         onClick={() => login()}
         background="rgba(20, 20, 30, 0.95)"
         shimmerColor="#5c7cfa"
-        className="dark:text-white text-sm font-semibold px-4 py-2"
+        className="dark:text-white text-xs sm:text-sm font-semibold px-3 py-1.5 sm:px-4 sm:py-2 whitespace-nowrap"
       >
         Sign In
       </ShimmerButton>
@@ -18,24 +18,24 @@ export function UserProfile() {
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 max-w-full">
       {user.picture && (
         <img
           src={user.picture}
           alt={user.name}
-          className="w-8 h-8 rounded-full border border-brand-400"
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-brand-400"
         />
       )}
-      <div className="text-sm">
-        <p className="font-medium text-white">{user.name}</p>
-        <p className="text-xs text-gray-400">{user.email}</p>
+      <div className="hidden sm:block min-w-0 text-sm text-right">
+        <p className="font-medium text-white max-w-[10rem] truncate">{user.name}</p>
+        <p className="text-xs text-gray-400 max-w-[12rem] truncate">{user.email}</p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         <ShimmerButton
           onClick={switchAccount}
           background="rgba(20, 20, 30, 0.95)"
           shimmerColor="#5c7cfa"
-          className="dark:text-white text-xs font-semibold px-3 py-1"
+          className="dark:text-white text-[11px] sm:text-xs font-semibold px-2.5 py-1 whitespace-nowrap"
         >
           Switch
         </ShimmerButton>
@@ -43,7 +43,7 @@ export function UserProfile() {
           onClick={logout}
           background="rgba(220, 38, 38, 1)"
           shimmerColor="#ffffff"
-          className="dark:text-white text-xs font-semibold px-3 py-1"
+          className="dark:text-white text-[11px] sm:text-xs font-semibold px-2.5 py-1 whitespace-nowrap"
         >
           Logout
         </ShimmerButton>
