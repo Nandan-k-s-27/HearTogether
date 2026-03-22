@@ -3,6 +3,16 @@ import axios from 'axios';
 
 const AuthContext = createContext(null);
 
+function decodeJwtPayload(token) {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    return JSON.parse(atob(payload));
+  } catch {
+    return null;
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -66,10 +76,10 @@ export function AuthProvider({ children }) {
     if (token) {
       // Persist token on frontend origin for cross-domain API auth.
       localStorage.setItem('auth_token', token);
-      
-      // Parse token to get user info (basic JWT decode)
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      setUser(payload);
+
+      // Parse token to get user info and keep UI responsive before /auth/status completes.
+      const payload = decodeJwtPayload(token);
+      if (payload) setUser(payload);
       
       const returnTo = localStorage.getItem('post_auth_redirect');
       if (returnTo) {
