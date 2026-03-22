@@ -9,6 +9,7 @@ import { ShimmerButton } from '../components/ui/shimmer-button';
 
 const CAPTURE_OPTIONS = [
   { id: 'tab', label: 'Browser Tab Audio', desc: 'Capture audio from a browser tab (recommended)' },
+  { id: 'window', label: 'Window/Screen + Audio', desc: 'Share any window or screen with system audio (media players, etc.)' },
   { id: 'mic', label: 'Microphone', desc: 'Broadcast live microphone input' },
 ];
 
@@ -150,9 +151,9 @@ export default function HostRoom() {
       let mediaStream;
       if (type === 'mic') {
         mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      } else {
+      } else if (type === 'tab' || type === 'window') {
         if (!navigator.mediaDevices?.getDisplayMedia) {
-          setCaptureError('Tab audio capture is not supported on this device. Open HearTogether on a desktop browser, or use Microphone mode instead.');
+          setCaptureError('Display capture is not supported on this device. Open HearTogether on a desktop browser, or use Microphone mode instead.');
           return;
         }
         // getDisplayMedia — video is required by the API.
@@ -174,6 +175,8 @@ export default function HostRoom() {
             autoGainControl: false,
           },
           preferCurrentTab: type === 'tab',
+          // For window capture, allow capturing from any window/screen
+          displaySurface: type === 'window' ? 'window' : undefined,
         });
       }
 
