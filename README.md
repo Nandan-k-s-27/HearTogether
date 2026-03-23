@@ -167,3 +167,96 @@ Rooms:
 - The browser warning about "Self-XSS" in console is expected and unrelated to app security defects.
 - Listener identity shown to the host uses authenticated user email for easier moderation.
 
+## Troubleshooting
+
+### "Waiting for Stream" — Listener stuck connecting
+
+If listeners are stuck on "Waiting for stream…" or "Connecting audio path…", check these in order:
+
+#### 1. **Check TURN Configuration**
+
+Open browser DevTools (F12) on the **Listener** tab and look for:
+- `[ListenerRoom] ICE servers loaded:` should show both STUN and TURN servers
+- `STUN=X, TURN=Y` should show `TURN > 0`
+- If `TURN=0`, TURN is not configured on the **backend** (Render)
+
+**Fix:** Add TURN env vars on Render:
+```env
+TURN_PROVIDER=ExpressTurn
+EXPRESSTURN_URLS=turn:your-relay:3478,turn:your-relay:3478?transport=tcp,turns:your-relay:5349
+EXPRESSTURN_USERNAME=...
+EXPRESSTURN_CREDENTIAL=...
+```
+
+#### 2. **Check Offer Delivery**
+
+In **Host** browser console (F12), look for:
+- `[HostRoom] listener joined: <id>` (listener connected to host)
+- `[HostRoom] stream exists, creating offer for <id>` (offer is being created)
+- `[WebRTC] offer created for <id>` (offer created successfully)
+- `[signal] offer from <host-id> → <listener-id>` (server received offer)
+
+In **Listener** console (F12), look for:
+- `[ListenerRoom] received offer from <id>` (offer arrived)
+
+**If offer is not arriving:** Check server logs on Render for `[signal] offer from <host-id>` — if it's missing, the host didn't send it.
+
+**If host not sending offers:** The stream may not have audio tracks. In host console, look for:
+- `[WebRTC] adding X audio tracks to peer connection`
+- If `adding 0 audio tracks`, ensure you selected system audio or microphone
+
+#### 3. **Check ICE Candidate Exchange**
+
+Look for in both consoles:
+- `[ICE host→<id>] type=relay` (relay candidate found, good sign)
+- `[ICE host→<id>] type=srflx` (reflexive candidate from firewall)
+- `[ICE host→<id>] type=host` (local IP, won't work on mobile over 4G)
+
+If **no relay candidates**, TURN config is wrong or not reaching the client. Verify EXPRESSTURN_* vars are set correctly on Render.
+
+#### 4. **Check WebRTC Connection State**
+
+Look for state transitions:
+```
+[WebRTC] listener←<host-id> connectionState: new
+[WebRTC] listener←<host-id> connectionState: connecting
+[WebRTC] listener←<host-id> iceCatheringState: gathering
+[WebRTC] listener←<host-id> connectionState: connected
+[WebRTC] received ontrack event from <host-id>
+[ListenerRoom] calling onTrackReady callback
+```
+
+**If stuck on "connecting":** ICE couldn't establish a path. Common causes:
+- Network blocked TURN port (check EXPRESSTURN_URLS uses accessible ports)
+- TURN credentials are wrong (typo in EXPRESSTURN_USERNAME/CREDENTIAL)
+- TURN URL syntax is wrong (should be `turn:host:port` or `turns:host:port`)
+
+**If never reaches "connected":** P2P negotiation failed.
+
+#### 5. **Check Server Logs (Render)**
+
+SSH into Render and tail logs for signaling issues:
+```
+[socket] connected: <socket-id> (user: example@gmail.com)
+[room ABC123] host joined
+[room ABC123] listener <socket-id> joined (1 total)
+[signal] offer from <host-socket-id> → <listener-socket-id>
+[signal] answer from <listener-socket-id> → <host-socket-id>
+```
+
+**Common issues in server logs:**
+- `WARN: offer is empty or null` — host sent malformed offer
+- `WARN: target socket X not found` — routing failed, listener socket disconnected
+- No `[ice-servers]` logs — backend didn't process the API call
+
+#### 6. **Test Locally First**
+
+Verify it works locally before deploying:
+1. Run backend: `npm run dev` in `server/`
+2. Run frontend: `npm run dev` in `client/`
+3. Open `http://localhost:5173` in two browser windows
+4. One as host, one as listener
+5. Start streaming and check console logs in both
+
+If it works locally but not on Render/Vercel, it's likely environment (TURN, CORS, deploy).
+
