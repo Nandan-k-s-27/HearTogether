@@ -74,6 +74,14 @@ const createRoomLimiter = rateLimit({
   message: { error: 'Too many rooms created. Please try again later.' },
 });
 
+const roomLookupLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many room lookups. Please try again later.' },
+});
+
 // Stale room cleanup: remove rooms older than 6 h with no active host
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 setInterval(() => {
@@ -218,7 +226,7 @@ app.get('/api/ice-servers', (_req, res) => {
 });
 
 // REST: get room info
-app.get('/api/rooms/:code', (req, res) => {
+app.get('/api/rooms/:code', roomLookupLimiter, (req, res) => {
   const code = req.params.code.replace(/[^A-Za-z0-9]/g, '').slice(0, 20).toUpperCase();
   const room = getRoomByCode(code);
   if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -243,6 +251,14 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   console.log(`[socket] connected: ${socket.id} (user: ${socket.user.email})`);
+
+  function getAuthorizedHostRoom() {
+    const { roomId, role } = socket.data;
+    if (role !== 'host' || !roomId) return null;
+    const room = getRoom(roomId);
+    if (!room || room.hostSocketId !== socket.id) return null;
+    return room;
+  }
 
   // Host joins room
   socket.on('host:join', ({ roomId }, cb) => {
@@ -330,37 +346,40 @@ io.on('connection', (socket) => {
     const room = getRoom(roomId);
     if (!room || !room.hostSocketId) return;
     if (socket.data.role !== 'listener' || socket.data.roomId !== roomId) return;
+    if (!room.listeners.has(socket.id)) return;
     console.log(`[signal] listener ${socket.id} requested offer resend in room ${roomId}`);
     io.to(room.hostSocketId).emit('listener:request-offer', { listenerId: socket.id });
   });
 
   // Host controls
   socket.on('host:pause', () => {
-    const { roomId } = socket.data;
-    if (roomId) socket.to(roomId).emit('host:paused');
+    const room = getAuthorizedHostRoom();
+    if (!room) return;
+    socket.to(room.id).emit('host:paused');
   });
 
   socket.on('host:resume', () => {
-    const { roomId } = socket.data;
-    if (roomId) socket.to(roomId).emit('host:resumed');
+    const room = getAuthorizedHostRoom();
+    if (!room) return;
+    socket.to(room.id).emit('host:resumed');
   });
 
   socket.on('host:stop', () => {
-    const { roomId } = socket.data;
-    if (roomId) {
-      socket.to(roomId).emit('host:stopped');
-      deleteRoom(roomId);
-    }
+    const room = getAuthorizedHostRoom();
+    if (!room) return;
+    socket.to(room.id).emit('host:stopped');
+    deleteRoom(room.id);
   });
 
   socket.on('host:remove-listener', ({ listenerId }) => {
-    const { roomId } = socket.data;
-    if (!roomId) return;
-    const room = getRoom(roomId);
-    if (room) removeListener(room.id, listenerId);
+    const room = getAuthorizedHostRoom();
+    if (!room) return;
+    if (!room.listeners.has(listenerId)) return;
+
+    removeListener(room.id, listenerId);
     io.to(listenerId).emit('host:removed');
     const listenerSocket = io.sockets.sockets.get(listenerId);
-    if (listenerSocket) listenerSocket.leave(roomId);
+    if (listenerSocket) listenerSocket.leave(room.id);
   });
 
   // Sync: host broadcasts its timestamp periodically

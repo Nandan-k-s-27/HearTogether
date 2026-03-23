@@ -51,7 +51,7 @@ HearTogether/
 
 - `/` -> public landing page
 - `/room/:code` -> public room preview page
-- `/listen/:roomId` -> protected listener room
+- `/listen/:code` -> protected listener room
 - `/host/:roomId` -> protected host dashboard
 - `/login` -> optional dedicated sign-in page
 
@@ -137,6 +137,13 @@ EXPRESSTURN_URLS=turn:your-relay:3478,turn:your-relay:3478?transport=tcp,turns:y
 EXPRESSTURN_USERNAME=...
 EXPRESSTURN_CREDENTIAL=...
 ```
+
+### Server Restarts and Room State
+
+- Rooms are kept in server memory, so a backend restart clears active rooms.
+- Host URLs still work: when a host reconnects to an old room id, the server recreates the room id automatically.
+- Listener links may temporarily show room not found until the host rejoins.
+- On Render free tier, inactivity can trigger restarts. A periodic health ping or active session helps keep the service warm.
 
 ### Google Cloud OAuth setup
 

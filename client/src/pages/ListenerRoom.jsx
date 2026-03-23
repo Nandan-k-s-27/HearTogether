@@ -7,7 +7,7 @@ import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 
 export default function ListenerRoom() {
-  const { roomId: roomCode } = useParams(); // roomId here is actually the room code
+  const { code: roomCode } = useParams();
   const navigate = useNavigate();
 
   const [status, setStatus] = useState('connecting'); // connecting | listening | paused | ended

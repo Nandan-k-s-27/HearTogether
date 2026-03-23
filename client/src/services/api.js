@@ -1,15 +1,5 @@
 import axios from 'axios';
-
-// Derive API base from VITE_BACKEND_URL
-// In production: VITE_BACKEND_URL should be set in Vercel env vars
-// In dev: falls back to localhost only if running on localhost
-const BACKEND_URL = (() => {
-  const url = import.meta.env.VITE_BACKEND_URL;
-  if (!url && (typeof window !== 'undefined' && window.location.hostname === 'localhost')) {
-    return 'http://localhost:3001';
-  }
-  return url || 'https://heartogether.onrender.com';
-})();
+import { BACKEND_URL } from '../lib/config';
 
 const API_BASE = `${BACKEND_URL}/api`;
 

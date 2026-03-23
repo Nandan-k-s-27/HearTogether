@@ -49,7 +49,7 @@ function AppRoutes() {
       />
       <Route path="/room/:code" element={<JoinPage />} />
       <Route
-        path="/listen/:roomId"
+        path="/listen/:code"
         element={
           <ProtectedRoute>
             <ListenerRoom />

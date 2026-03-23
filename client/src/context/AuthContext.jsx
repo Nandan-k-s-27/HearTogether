@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
+import { BACKEND_URL } from '../lib/config';
 
 const AuthContext = createContext(null);
 
@@ -18,25 +19,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Ensure BACKEND_URL is consistent - read once and use everywhere
-  const BACKEND_URL = (() => {
-    const url = import.meta.env.VITE_BACKEND_URL;
-    // Only use localhost fallback in development (when running on localhost)
-    if (!url && window.location.hostname === 'localhost') {
-      return 'http://localhost:3001';
-    }
-    return url || 'https://heartogether.onrender.com';
-  })();
-
   const getStoredToken = () => localStorage.getItem('auth_token');
-
-  // Debug: Log the backend URL being used (remove in production)
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.log('[Auth] BACKEND_URL:', BACKEND_URL);
-      console.log('[Auth] VITE_BACKEND_URL env:', import.meta.env.VITE_BACKEND_URL);
-    }
-  }, [BACKEND_URL]);
 
   // Check if user is authenticated on mount or when token changes
   useEffect(() => {
