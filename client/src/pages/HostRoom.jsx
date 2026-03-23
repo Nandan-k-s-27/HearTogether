@@ -28,9 +28,16 @@ export default function HostRoom() {
   // Fetch TURN-capable ICE servers from backend as early as possible so they
   // are ready before the first listener joins and createOffer() is called.
   useEffect(() => {
+    console.log(`[HostRoom] fetching ICE servers on mount`);
     getIceServers().then((data) => {
-      if (data?.iceServers) setIceServersConfig({ iceServers: data.iceServers });
-    });
+      if (data?.iceServers) {
+        console.log(`[HostRoom] ICE servers loaded:`, data.iceServers);
+        const turnCount = data.iceServers.filter(s => s.urls.toLowerCase().includes('turn')).length;
+        const stunCount = data.iceServers.filter(s => s.urls.toLowerCase().includes('stun')).length;
+        console.log(`[HostRoom] STUN=${stunCount}, TURN=${turnCount}`);
+        setIceServersConfig({ iceServers: data.iceServers });
+      }
+    }).catch(err => console.error(`[HostRoom] failed to fetch ICE servers:`, err));
   }, []);
 
   const { createOffer, handleAnswer, handleIceCandidate, removePeer, closeAll } = useHostWebRTC(socket, stream, iceServersConfig);
@@ -90,6 +97,7 @@ export default function HostRoom() {
   // Listen for signaling events
   useEffect(() => {
     const onListenerJoined = ({ listenerId, listenerEmail, listenerName }) => {
+      console.log(`[HostRoom] listener joined: ${listenerId} (${listenerEmail})`);
       setListeners((prev) => {
         if (prev.some((l) => l.id === listenerId)) return prev;
         return [...prev, {
@@ -99,16 +107,28 @@ export default function HostRoom() {
           joinedAt: Date.now(),
         }];
       });
-      if (stream) createOffer(listenerId);
+      if (stream) {
+        console.log(`[HostRoom] stream exists, creating offer for ${listenerId}`);
+        createOffer(listenerId);
+      } else {
+        console.log(`[HostRoom] stream not ready yet, deferring offer creation for ${listenerId}`);
+      }
     };
 
     const onListenerLeft = ({ listenerId }) => {
+      console.log(`[HostRoom] listener left: ${listenerId}`);
       setListeners((prev) => prev.filter((l) => l.id !== listenerId));
       removePeer(listenerId);
     };
 
-    const onAnswer = ({ from, answer }) => handleAnswer(from, answer);
-    const onIce = ({ from, candidate }) => handleIceCandidate(from, candidate);
+    const onAnswer = ({ from, answer }) => {
+      console.log(`[HostRoom] received answer from ${from}`);
+      handleAnswer(from, answer);
+    };
+    const onIce = ({ from, candidate }) => {
+      console.log(`[HostRoom] received ice-candidate from ${from}`);
+      handleIceCandidate(from, candidate);
+    };
 
     socket.on('listener:joined', onListenerJoined);
     socket.on('listener:left', onListenerLeft);
@@ -218,7 +238,11 @@ export default function HostRoom() {
   // When stream changes, send offers to any listeners already in the room.
   useEffect(() => {
     if (stream && listeners.length > 0) {
-      listeners.forEach((l) => createOffer(l.id));
+      console.log(`[HostRoom] stream available, creating offers for ${listeners.length} listeners`);
+      listeners.forEach((l) => {
+        console.log(`[HostRoom] creating offer for listener ${l.id}`);
+        createOffer(l.id);
+      });
     }
   }, [stream, listeners, createOffer]);
 

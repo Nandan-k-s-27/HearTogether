@@ -27,11 +27,24 @@ export default function ListenerRoom() {
 
   // Fetch TURN-capable ICE servers FIRST, then join the room.
   useEffect(() => {
+    console.log(`[ListenerRoom] fetching ICE servers`);
     getIceServers()
       .then((data) => {
-        if (data?.iceServers) setIceServersConfig({ iceServers: data.iceServers });
+        if (data?.iceServers) {
+          console.log(`[ListenerRoom] ICE servers loaded:`, data.iceServers);
+          const turnCount = data.iceServers.filter(s => s.urls.toLowerCase().includes('turn')).length;
+          const stunCount = data.iceServers.filter(s => s.urls.toLowerCase().includes('stun')).length;
+          console.log(`[ListenerRoom] STUN=${stunCount}, TURN=${turnCount}`);
+          setIceServersConfig({ iceServers: data.iceServers });
+        } else {
+          console.warn(`[ListenerRoom] no iceServers in response`);
+        }
       })
-      .finally(() => setIceReady(true)); // always unblock join, even on fetch failure
+      .catch((err) => console.error(`[ListenerRoom] failed to fetch ICE servers:`, err))
+      .finally(() => {
+        console.log(`[ListenerRoom] setting iceReady=true`);
+        setIceReady(true);
+      });
   }, []);
 
   const { handleOffer, handleIceCandidate, close, audioRef, remoteStreamRef } = useListenerWebRTC(socket, {
@@ -125,19 +138,31 @@ export default function ListenerRoom() {
   // Signaling events
   useEffect(() => {
     const onOffer = ({ from, offer }) => {
+      console.log(`[ListenerRoom] received offer from ${from}`);
       handleOffer(from, offer);
       setStatus('listening');
     };
 
-    const onIce = ({ from, candidate }) => handleIceCandidate(from, candidate);
+    const onIce = ({ from, candidate }) => {
+      console.log(`[ListenerRoom] received ice-candidate from ${from}`);
+      handleIceCandidate(from, candidate);
+    };
 
-    const onPaused = () => setStatus('paused');
-    const onResumed = () => setStatus('listening');
+    const onPaused = () => {
+      console.log(`[ListenerRoom] host paused`);
+      setStatus('paused');
+    };
+    const onResumed = () => {
+      console.log(`[ListenerRoom] host resumed`);
+      setStatus('listening');
+    };
     const onStopped = () => {
+      console.log(`[ListenerRoom] host stopped`);
       setStatus('ended');
       close();
     };
     const onRemoved = () => {
+      console.log(`[ListenerRoom] removed by host`);
       setStatus('ended');
       close();
     };

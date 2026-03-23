@@ -24,12 +24,14 @@ const DEFAULT_ICE_SERVERS = {
 };
 
 // Log which ICE candidate types are gathered — helps diagnose whether TURN
-// relay candidates arrive.  Only active in dev builds.
+// relay candidates arrive. Logged in all builds to aid production debugging.
 function logIceCandidate(label, candidate) {
-  if (!import.meta.env.DEV || !candidate) return;
+  if (!candidate) return;
   const c = candidate.candidate || '';
   const type = candidate.type || (c.includes('relay') ? 'relay' : c.includes('srflx') ? 'srflx' : 'host');
-  console.log(`[ICE ${label}] ${type}: ${c.slice(0, 80)}`);
+  const parts = c.split(' ');
+  const priority = parts[3] || '?';
+  console.log(`[ICE ${label}] type=${type} priority=${priority}`);
 }
 
 /**
@@ -44,22 +46,34 @@ export function useHostWebRTC(socket, stream, iceServersConfig) {
 
   const createOffer = useCallback(
     async (listenerId) => {
-      if (!stream) return;
+      if (!stream) {
+        console.warn(`[WebRTC] createOffer called but stream is null for ${listenerId}`);
+        return;
+      }
       // Close stale connection if one already exists for this listener.
       const old = peers.current.get(listenerId);
-      if (old) old.close();
+      if (old) {
+        console.log(`[WebRTC] closing stale connection for ${listenerId}`);
+        old.close();
+      }
 
+      console.log(`[WebRTC] creating offer for ${listenerId}`);
       const pc = new RTCPeerConnection(iceRef.current);
       peers.current.set(listenerId, pc);
 
       // Add audio tracks
-      stream.getAudioTracks().forEach((track) => {
+      const audioTracks = stream.getAudioTracks();
+      console.log(`[WebRTC] adding ${audioTracks.length} audio tracks to peer connection for ${listenerId}`);
+      if (audioTracks.length === 0) {
+        console.warn(`[WebRTC] WARNING: no audio tracks found in stream for ${listenerId}`);
+      }
+      audioTracks.forEach((track) => {
         pc.addTrack(track, stream);
       });
 
       pc.onicecandidate = (e) => {
         if (e.candidate) {
-          logIceCandidate('host', e.candidate);
+          logIceCandidate(`host→${listenerId}`, e.candidate);
           socket.emit('signal:ice-candidate', { to: listenerId, candidate: e.candidate });
         }
       };
@@ -67,6 +81,7 @@ export function useHostWebRTC(socket, stream, iceServersConfig) {
       // Auto-restart ICE when media path fails (network switch, timeout, etc.)
       let iceRestarts = 0;
       pc.onconnectionstatechange = () => {
+        console.log(`[WebRTC] host→${listenerId} connectionState: ${pc.connectionState}`);
         if (pc.connectionState === 'failed' && iceRestarts < 3) {
           iceRestarts++;
           console.log(`[WebRTC] host→${listenerId} failed – ICE restart #${iceRestarts}`);
@@ -77,12 +92,23 @@ export function useHostWebRTC(socket, stream, iceServersConfig) {
             .catch((err) => console.error('[WebRTC] ICE restart error:', err));
         } else if (pc.connectionState === 'connected') {
           iceRestarts = 0;
+          console.log(`[WebRTC] host→${listenerId} connected successfully`);
         }
       };
 
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socket.emit('signal:offer', { to: listenerId, offer });
+      pc.addEventListener('icegatheringstatechange', () => {
+        console.log(`[WebRTC] host→${listenerId} iceGatheringState: ${pc.iceGatheringState}`);
+      });
+
+      try {
+        const offer = await pc.createOffer();
+        console.log(`[WebRTC] offer created for ${listenerId}`);
+        await pc.setLocalDescription(offer);
+        console.log(`[WebRTC] sending offer to ${listenerId}`);
+        socket.emit('signal:offer', { to: listenerId, offer });
+      } catch (err) {
+        console.error(`[WebRTC] failed to create/send offer for ${listenerId}:`, err);
+      }
     },
     [socket, stream],
   );
@@ -147,38 +173,56 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
 
   const handleOffer = useCallback(
     async (hostId, offer) => {
+      console.log(`[WebRTC] received offer from ${hostId}`);
       // Same host re-sending offer on a live connection → ICE restart.
       // Reuse the existing RTCPeerConnection so relay candidates are
       // renegotiated without dropping the media stream.
       const existingPc = pcRef.current;
       if (existingPc && existingPc.signalingState !== 'closed' && hostIdRef.current === hostId) {
-        await existingPc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await existingPc.createAnswer();
-        await existingPc.setLocalDescription(answer);
-        socket.emit('signal:answer', { to: hostId, answer });
+        console.log(`[WebRTC] reusing existing connection for ICE restart from ${hostId}`);
+        try {
+          await existingPc.setRemoteDescription(new RTCSessionDescription(offer));
+          const answer = await existingPc.createAnswer();
+          await existingPc.setLocalDescription(answer);
+          socket.emit('signal:answer', { to: hostId, answer });
+          console.log(`[WebRTC] sent answer for ICE restart to ${hostId}`);
+        } catch (err) {
+          console.error(`[WebRTC] ICE restart failed for ${hostId}:`, err);
+        }
         return;
       }
 
       // Different host or first offer — close old connection and create new one.
-      if (existingPc) existingPc.close();
+      if (existingPc) {
+        console.log(`[WebRTC] closing old connection (different host or first offer)`);
+        existingPc.close();
+      }
       hostIdRef.current = hostId;
 
       const pc = new RTCPeerConnection(iceRef.current);
       pcRef.current = pc;
 
+      console.log(`[WebRTC] created new peer connection for ${hostId}`);
+
       // Track real ICE/DTLS connection state so the UI can surface failures.
       pc.onconnectionstatechange = () => {
+        console.log(`[WebRTC] listener←${hostId} connectionState: ${pc.connectionState}`);
         onConnectionStateRef.current?.(pc.connectionState);
       };
 
+      pc.addEventListener('icegatheringstatechange', () => {
+        console.log(`[WebRTC] listener←${hostId} iceGatheringState: ${pc.iceGatheringState}`);
+      });
+
       pc.onicecandidate = (e) => {
         if (e.candidate) {
-          logIceCandidate('listener', e.candidate);
+          logIceCandidate(`listener←${hostId}`, e.candidate);
           socket.emit('signal:ice-candidate', { to: hostId, candidate: e.candidate });
         }
       };
 
       pc.ontrack = (e) => {
+        console.log(`[WebRTC] received ontrack event from ${hostId}`, e.track);
         // Some mobile browsers fire ontrack before streams[] is populated —
         // fall back to constructing a stream directly from the track.
         const stream = (e.streams && e.streams.length > 0)
@@ -189,6 +233,7 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
 
         // Prime the audio element if it is already in the DOM.
         if (audioRef.current) {
+          console.log(`[WebRTC] attaching stream to audio element`);
           audioRef.current.srcObject = stream;
           audioRef.current.muted = false;
         }
@@ -196,13 +241,21 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
         // Tell the UI the stream is ready.  The UI will show a "Tap to play"
         // button; the user's tap calls audio.play() inside a gesture context,
         // which is the only reliable way to start audio on mobile.
+        console.log(`[WebRTC] calling onTrackReady callback`);
         onTrackReadyRef.current?.();
       };
 
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socket.emit('signal:answer', { to: hostId, answer });
+      try {
+        console.log(`[WebRTC] setting remote description (offer) from ${hostId}`);
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        console.log(`[WebRTC] created answer for ${hostId}`);
+        await pc.setLocalDescription(answer);
+        console.log(`[WebRTC] sending answer to ${hostId}`);
+        socket.emit('signal:answer', { to: hostId, answer });
+      } catch (err) {
+        console.error(`[WebRTC] failed to handle offer from ${hostId}:`, err);
+      }
     },
     [socket],
   );

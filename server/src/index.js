@@ -192,11 +192,16 @@ app.get('/api/ice-servers', (_req, res) => {
   const iceServers = [...STUN_SERVERS];
 
   if (hasTurn) {
-    TURN_URLS.split(',').map((u) => u.trim()).filter(Boolean).forEach((url) => {
+    const parsedUrls = TURN_URLS.split(',').map((u) => u.trim()).filter(Boolean);
+    console.log(`[ice-servers] adding ${parsedUrls.length} TURN URLs with auth`);
+    parsedUrls.forEach((url) => {
       iceServers.push({ urls: url, username: TURN_USERNAME, credential: TURN_CREDENTIAL });
     });
+  } else {
+    console.warn(`[ice-servers] WARN: no TURN configured, clients will use STUN only`);
   }
 
+  console.log(`[ice-servers] returning ${iceServers.length} total servers (${STUN_SERVERS.length} STUN, ${iceServers.length - STUN_SERVERS.length} TURN)`);
   res.json({ iceServers });
 });
 
@@ -273,14 +278,37 @@ io.on('connection', (socket) => {
 
   // WebRTC signaling
   socket.on('signal:offer', ({ to, offer }) => {
+    console.log(`[signal] offer from ${socket.id} → ${to}`);
+    if (!offer) {
+      console.warn(`[signal] WARN: offer is empty or null from ${socket.id}`);
+      return;
+    }
+    const targetSocket = io.sockets.sockets.get(to);
+    if (!targetSocket) {
+      console.warn(`[signal] WARN: target socket ${to} not found for offer from ${socket.id}`);
+      return;
+    }
     io.to(to).emit('signal:offer', { from: socket.id, offer });
+    console.log(`[signal] offer delivered to ${to}`);
   });
 
   socket.on('signal:answer', ({ to, answer }) => {
+    console.log(`[signal] answer from ${socket.id} → ${to}`);
+    if (!answer) {
+      console.warn(`[signal] WARN: answer is empty or null from ${socket.id}`);
+      return;
+    }
     io.to(to).emit('signal:answer', { from: socket.id, answer });
+    console.log(`[signal] answer delivered to ${to}`);
   });
 
   socket.on('signal:ice-candidate', ({ to, candidate }) => {
+    if (!candidate) {
+      console.warn(`[signal] WARN: ice-candidate is empty or null from ${socket.id}`);
+      return;
+    }
+    const type = candidate.type || '?';
+    console.log(`[signal] ice-candidate (${type}) from ${socket.id} → ${to}`);
     io.to(to).emit('signal:ice-candidate', { from: socket.id, candidate });
   });
 
