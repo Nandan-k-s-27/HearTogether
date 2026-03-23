@@ -81,10 +81,12 @@ GOOGLE_CALLBACK_URL=http://localhost:3001/auth/google/callback
 
 JWT_SECRET=replace_with_a_long_random_secret
 
-# Optional TURN relay
-# TURN_URLS=turn:relay.metered.ca:80
-# TURN_USERNAME=your_username
-# TURN_CREDENTIAL=your_credential
+# Optional TURN relay (recommended: ExpressTurn)
+# TURN_PROVIDER=ExpressTurn
+# EXPRESSTURN_URLS=turn:your-relay:3478,turn:your-relay:3478?transport=tcp,turns:your-relay:5349
+# EXPRESSTURN_USERNAME=your_username
+# EXPRESSTURN_CREDENTIAL=your_credential
+# (Legacy names also supported: TURN_URLS, TURN_USERNAME, TURN_CREDENTIAL)
 ```
 
 Client (`client/.env`):
@@ -128,6 +130,12 @@ GOOGLE_CLIENT_SECRET=...
 GOOGLE_CALLBACK_URL=https://your-backend.onrender.com/auth/google/callback
 JWT_SECRET=replace_with_a_long_random_secret
 PORT=3001
+
+# Optional TURN relay for reliable mobile/cellular audio
+TURN_PROVIDER=ExpressTurn
+EXPRESSTURN_URLS=turn:your-relay:3478,turn:your-relay:3478?transport=tcp,turns:your-relay:5349
+EXPRESSTURN_USERNAME=...
+EXPRESSTURN_CREDENTIAL=...
 ```
 
 ### Google Cloud OAuth setup

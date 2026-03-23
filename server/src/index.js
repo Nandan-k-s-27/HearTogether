@@ -160,20 +160,21 @@ app.post('/api/rooms', authMiddleware, createRoomLimiter, (_req, res) => {
   res.status(201).json(room);
 });
 
-// TURN configuration (Metered.ca free plan)
-const TURN_URLS       = process.env.TURN_URLS;
-const TURN_USERNAME   = process.env.TURN_USERNAME;
-const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
+// TURN configuration (ExpressTurn recommended).
+// Supports both new provider-specific names and legacy TURN_* names.
+const TURN_URLS = process.env.EXPRESSTURN_URLS || process.env.TURN_URLS;
+const TURN_USERNAME = process.env.EXPRESSTURN_USERNAME || process.env.TURN_USERNAME;
+const TURN_CREDENTIAL = process.env.EXPRESSTURN_CREDENTIAL || process.env.TURN_CREDENTIAL;
+const TURN_PROVIDER = process.env.TURN_PROVIDER || 'ExpressTurn';
 
 const hasTurn = Boolean(TURN_URLS && TURN_USERNAME && TURN_CREDENTIAL);
 
 if (!hasTurn) {
   console.warn('');
   console.warn('WARNING: No TURN relay configured - audio will NOT work on mobile/cellular.');
-  console.warn('  FREE option (no card): Metered.ca 0.5 GB/month free plan.');
-  console.warn('    1. Sign up at https://dashboard.metered.ca/signup');
-  console.warn('    2. Create an app -> TURN Credentials -> copy username, credential & URLs.');
-  console.warn('    3. Set env vars on Render: TURN_URLS, TURN_USERNAME, TURN_CREDENTIAL');
+  console.warn('  Configure ExpressTurn (or any TURN provider) in environment variables.');
+  console.warn('    Preferred: EXPRESSTURN_URLS, EXPRESSTURN_USERNAME, EXPRESSTURN_CREDENTIAL');
+  console.warn('    Legacy:    TURN_URLS, TURN_USERNAME, TURN_CREDENTIAL');
   console.warn('');
 }
 
@@ -184,7 +185,7 @@ const STUN_SERVERS = [
   { urls: 'stun:stun3.l.google.com:19302' },
 ];
 
-// Returns STUN + Metered.ca TURN servers to clients.
+// Returns STUN + TURN servers to clients.
 app.get('/api/ice-servers', (_req, res) => {
   res.setHeader('Cache-Control', 'private, max-age=300');
 
@@ -345,6 +346,6 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`HearTogether server listening on port ${PORT}`);
-  if (hasTurn) console.log('[TURN] provider: Metered.ca OK');
-  else         console.log('[TURN] WARNING: no relay configured - mobile audio will fail');
+  if (hasTurn) console.log(`[TURN] provider: ${TURN_PROVIDER} OK`);
+  else console.log('[TURN] WARNING: no relay configured - mobile audio will fail');
 });
