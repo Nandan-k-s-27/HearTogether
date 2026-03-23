@@ -53,6 +53,17 @@ export default function ListenerRoom() {
     iceServersConfig,
   });
   const audioElRef = useRef(null);
+  const joinedRoomIdRef = useRef(null);
+  const offerRetryTimerRef = useRef(null);
+  const offerRetryAttemptsRef = useRef(0);
+
+  const clearOfferRetryTimer = useCallback(() => {
+    if (offerRetryTimerRef.current) {
+      clearInterval(offerRetryTimerRef.current);
+      offerRetryTimerRef.current = null;
+    }
+    offerRetryAttemptsRef.current = 0;
+  }, []);
 
   // Stable callback ref — using useCallback avoids React's detach-reattach
   // cycle on every re-render, which would briefly set audioRef.current = null
@@ -118,16 +129,38 @@ export default function ListenerRoom() {
           return;
         }
         setStatus('listening');
+        joinedRoomIdRef.current = res.roomId;
+
+        // Recovery path: if first offer gets missed due to timing, ask host
+        // to resend it a few times while still waiting for a remote track.
+        clearOfferRetryTimer();
+        offerRetryTimerRef.current = setInterval(() => {
+          const roomId = joinedRoomIdRef.current;
+          const hasTrack = Boolean(remoteStreamRef.current);
+          if (!roomId || hasTrack) {
+            clearOfferRetryTimer();
+            return;
+          }
+          offerRetryAttemptsRef.current += 1;
+          if (offerRetryAttemptsRef.current > 5) {
+            clearOfferRetryTimer();
+            return;
+          }
+          console.log(`[ListenerRoom] no remote track yet, requesting offer retry #${offerRetryAttemptsRef.current}`);
+          socket.emit('listener:request-offer', { roomId });
+        }, 2000);
       });
     }
 
     tryJoin();
 
     return () => {
+      clearOfferRetryTimer();
+      joinedRoomIdRef.current = null;
       close();
       socket.disconnect();
     };
-  }, [iceReady, roomCode, navigate, close]);
+  }, [iceReady, roomCode, navigate, close, clearOfferRetryTimer, remoteStreamRef]);
 
   // Keep Render awake: ping /api/health every 8 minutes.
   useEffect(() => {
@@ -139,6 +172,7 @@ export default function ListenerRoom() {
   useEffect(() => {
     const onOffer = ({ from, offer }) => {
       console.log(`[ListenerRoom] received offer from ${from}`);
+      clearOfferRetryTimer();
       handleOffer(from, offer);
       setStatus('listening');
     };
@@ -159,11 +193,13 @@ export default function ListenerRoom() {
     const onStopped = () => {
       console.log(`[ListenerRoom] host stopped`);
       setStatus('ended');
+      clearOfferRetryTimer();
       close();
     };
     const onRemoved = () => {
       console.log(`[ListenerRoom] removed by host`);
       setStatus('ended');
+      clearOfferRetryTimer();
       close();
     };
 
@@ -182,9 +218,10 @@ export default function ListenerRoom() {
       socket.off('host:stopped', onStopped);
       socket.off('host:removed', onRemoved);
     };
-  }, [handleOffer, handleIceCandidate, close]);
+  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer]);
 
   const handleLeave = () => {
+    clearOfferRetryTimer();
     close();
     socket.disconnect();
     // replace: true removes this room URL from history so pressing the device

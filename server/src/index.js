@@ -185,6 +185,15 @@ const STUN_SERVERS = [
   { urls: 'stun:stun3.l.google.com:19302' },
 ];
 
+function normalizeTurnUrl(rawUrl) {
+  const url = String(rawUrl || '').trim();
+  if (!url) return null;
+  // Accept valid ICE schemes as-is.
+  if (/^(turn|turns|stun|stuns):/i.test(url)) return url;
+  // Common misconfiguration from providers: host:port without scheme.
+  return `turn:${url}`;
+}
+
 // Returns STUN + TURN servers to clients.
 app.get('/api/ice-servers', (_req, res) => {
   res.setHeader('Cache-Control', 'private, max-age=300');
@@ -192,7 +201,10 @@ app.get('/api/ice-servers', (_req, res) => {
   const iceServers = [...STUN_SERVERS];
 
   if (hasTurn) {
-    const parsedUrls = TURN_URLS.split(',').map((u) => u.trim()).filter(Boolean);
+    const parsedUrls = TURN_URLS
+      .split(',')
+      .map((u) => normalizeTurnUrl(u))
+      .filter(Boolean);
     console.log(`[ice-servers] adding ${parsedUrls.length} TURN URLs with auth`);
     parsedUrls.forEach((url) => {
       iceServers.push({ urls: url, username: TURN_USERNAME, credential: TURN_CREDENTIAL });
@@ -310,6 +322,16 @@ io.on('connection', (socket) => {
     const type = candidate.type || '?';
     console.log(`[signal] ice-candidate (${type}) from ${socket.id} → ${to}`);
     io.to(to).emit('signal:ice-candidate', { from: socket.id, candidate });
+  });
+
+  // Listener can request host to resend an SDP offer if initial signaling
+  // was missed due to timing during room join.
+  socket.on('listener:request-offer', ({ roomId }) => {
+    const room = getRoom(roomId);
+    if (!room || !room.hostSocketId) return;
+    if (socket.data.role !== 'listener' || socket.data.roomId !== roomId) return;
+    console.log(`[signal] listener ${socket.id} requested offer resend in room ${roomId}`);
+    io.to(room.hostSocketId).emit('listener:request-offer', { listenerId: socket.id });
   });
 
   // Host controls

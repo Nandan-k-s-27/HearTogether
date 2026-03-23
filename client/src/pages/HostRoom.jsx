@@ -129,17 +129,28 @@ export default function HostRoom() {
       console.log(`[HostRoom] received ice-candidate from ${from}`);
       handleIceCandidate(from, candidate);
     };
+    const onRequestOffer = ({ listenerId }) => {
+      if (!listenerId) return;
+      if (!streamRef.current) {
+        console.log(`[HostRoom] offer retry requested by ${listenerId}, but stream is not active`);
+        return;
+      }
+      console.log(`[HostRoom] offer retry requested by ${listenerId}; resending offer`);
+      createOffer(listenerId);
+    };
 
     socket.on('listener:joined', onListenerJoined);
     socket.on('listener:left', onListenerLeft);
     socket.on('signal:answer', onAnswer);
     socket.on('signal:ice-candidate', onIce);
+    socket.on('listener:request-offer', onRequestOffer);
 
     return () => {
       socket.off('listener:joined', onListenerJoined);
       socket.off('listener:left', onListenerLeft);
       socket.off('signal:answer', onAnswer);
       socket.off('signal:ice-candidate', onIce);
+      socket.off('listener:request-offer', onRequestOffer);
     };
   }, [stream, createOffer, handleAnswer, handleIceCandidate, removePeer]);
 
