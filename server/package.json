@@ -23,5 +23,8 @@
   "devDependencies": {
     "@types/node": "^20.17.57",
     "nodemon": "^3.0.2"
+  },
+  "overrides": {
+    "socket.io-parser": "4.2.6"
   }
 }

@@ -174,6 +174,13 @@ Rooms:
 - The browser warning about "Self-XSS" in console is expected and unrelated to app security defects.
 - Listener identity shown to the host uses authenticated user email for easier moderation.
 
+## Security Notes
+
+- Dependency audits are run for both client and server as part of maintenance.
+- Socket.IO parser is pinned to a patched version via npm overrides.
+- Client currently has a moderate Vite/esbuild advisory that requires a major Vite upgrade to fully remove.
+- Mitigation: do not expose the Vite dev server publicly. Keep local development on localhost/private network and deploy only the production build.
+
 ## Troubleshooting
 
 ### "Waiting for Stream" — Listener stuck connecting
