@@ -34,14 +34,41 @@ function logIceCandidate(label, candidate) {
   console.log(`[ICE ${label}] type=${type} priority=${priority}`);
 }
 
+function normalizeIceUrl(rawUrl) {
+  const url = String(rawUrl || '').trim();
+  if (!url) return null;
+  if (/^(turn|turns|stun|stuns):/i.test(url)) return url;
+  // Provider dashboards sometimes return host:port without scheme.
+  return `turn:${url}`;
+}
+
+function normalizeIceConfig(config) {
+  const base = config?.iceServers ? config : DEFAULT_ICE_SERVERS;
+  const normalizedServers = (base.iceServers || []).map((server) => {
+    const rawUrls = server?.urls;
+    const urls = Array.isArray(rawUrls)
+      ? rawUrls.map((u) => normalizeIceUrl(u)).filter(Boolean)
+      : normalizeIceUrl(rawUrls);
+
+    if (!urls || (Array.isArray(urls) && urls.length === 0)) return null;
+    return { ...server, urls };
+  }).filter(Boolean);
+
+  return {
+    ...base,
+    iceServers: normalizedServers,
+    ...EXTRA_PC_OPTIONS,
+  };
+}
+
 /**
  * Hook for the HOST side: creates a peer connection per listener and sends audio.
  */
 export function useHostWebRTC(socket, stream, iceServersConfig) {
   const peers = useRef(new Map()); // listenerId -> RTCPeerConnection
-  const iceRef = useRef(iceServersConfig ? { ...iceServersConfig, ...EXTRA_PC_OPTIONS } : DEFAULT_ICE_SERVERS);
+  const iceRef = useRef(normalizeIceConfig(iceServersConfig));
   useEffect(() => {
-    iceRef.current = iceServersConfig ? { ...iceServersConfig, ...EXTRA_PC_OPTIONS } : DEFAULT_ICE_SERVERS;
+    iceRef.current = normalizeIceConfig(iceServersConfig);
   }, [iceServersConfig]);
 
   const createOffer = useCallback(
@@ -58,7 +85,13 @@ export function useHostWebRTC(socket, stream, iceServersConfig) {
       }
 
       console.log(`[WebRTC] creating offer for ${listenerId}`);
-      const pc = new RTCPeerConnection(iceRef.current);
+      let pc;
+      try {
+        pc = new RTCPeerConnection(iceRef.current);
+      } catch (err) {
+        console.error(`[WebRTC] failed to construct host RTCPeerConnection for ${listenerId}:`, err, iceRef.current);
+        return;
+      }
       peers.current.set(listenerId, pc);
 
       // Add audio tracks
@@ -162,11 +195,11 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
   // Ref-wrap callbacks so closures never hold stale values.
   const onTrackReadyRef = useRef(onTrackReady);
   const onConnectionStateRef = useRef(onConnectionState);
-  const iceRef = useRef(iceServersConfig ? { ...iceServersConfig, ...EXTRA_PC_OPTIONS } : DEFAULT_ICE_SERVERS);
+  const iceRef = useRef(normalizeIceConfig(iceServersConfig));
   useEffect(() => { onTrackReadyRef.current = onTrackReady; }, [onTrackReady]);
   useEffect(() => { onConnectionStateRef.current = onConnectionState; }, [onConnectionState]);
   useEffect(() => {
-    iceRef.current = iceServersConfig ? { ...iceServersConfig, ...EXTRA_PC_OPTIONS } : DEFAULT_ICE_SERVERS;
+    iceRef.current = normalizeIceConfig(iceServersConfig);
   }, [iceServersConfig]);
 
   const hostIdRef = useRef(null);
@@ -199,7 +232,13 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
       }
       hostIdRef.current = hostId;
 
-      const pc = new RTCPeerConnection(iceRef.current);
+      let pc;
+      try {
+        pc = new RTCPeerConnection(iceRef.current);
+      } catch (err) {
+        console.error(`[WebRTC] failed to construct listener RTCPeerConnection for ${hostId}:`, err, iceRef.current);
+        return;
+      }
       pcRef.current = pc;
 
       console.log(`[WebRTC] created new peer connection for ${hostId}`);
