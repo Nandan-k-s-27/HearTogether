@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext';
 export default function JoinPage() {
   const { code } = useParams();
   const navigate = useNavigate();
-  const { user, login } = useAuth();
+  const { user, login, authBootState } = useAuth();
   const [room, setRoom] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -84,9 +84,10 @@ export default function JoinPage() {
                 <span>{authHint}</span>
                 <button
                   onClick={() => login({ returnTo: `/listen/${code.trim().toUpperCase()}` })}
-                  className="underline underline-offset-2"
+                  disabled={authBootState.active}
+                  className="underline underline-offset-2 disabled:no-underline disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  Sign In
+                  {authBootState.active ? 'Starting...' : 'Sign In'}
                 </button>
               </div>
             </div>

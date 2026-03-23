@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext';
 
 export default function LandingPage() {
   const navigate = useNavigate();
-  const { user, login } = useAuth();
+  const { user, login, authBootState } = useAuth();
   const [joinCode, setJoinCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [authHint, setAuthHint] = useState('');
@@ -117,9 +117,10 @@ export default function LandingPage() {
               <span>{authHint}</span>
               <button
                 onClick={() => login()}
-                className="rounded-md bg-yellow-400/20 px-3 py-1 text-yellow-200 hover:bg-yellow-400/30 transition"
+                disabled={authBootState.active}
+                className="rounded-md bg-yellow-400/20 px-3 py-1 text-yellow-200 hover:bg-yellow-400/30 transition disabled:cursor-not-allowed disabled:opacity-70"
               >
-                Sign In
+                {authBootState.active ? 'Starting...' : 'Sign In'}
               </button>
             </div>
           </div>

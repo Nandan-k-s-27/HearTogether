@@ -8,7 +8,17 @@ const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const { createRoom, createRoomWithId, getRoom, deleteRoom, addListener, removeListener, getRoomByCode, getAllRooms } = require('./rooms');
+const {
+  createRoom,
+  createRoomWithId,
+  getRoom,
+  deleteRoom,
+  addListener,
+  removeListener,
+  setListenerReaction,
+  getRoomByCode,
+  getAllRooms,
+} = require('./rooms');
 const { createToken, verifyToken, authMiddleware, getOrCreateUser } = require('./auth');
 
 const app = express();
@@ -349,6 +359,31 @@ io.on('connection', (socket) => {
     if (!room.listeners.has(socket.id)) return;
     console.log(`[signal] listener ${socket.id} requested offer resend in room ${roomId}`);
     io.to(room.hostSocketId).emit('listener:request-offer', { listenerId: socket.id });
+  });
+
+  socket.on('listener:reaction', ({ reaction }) => {
+    const { role, roomId } = socket.data;
+    if (role !== 'listener' || !roomId) return;
+
+    const room = getRoom(roomId);
+    if (!room || !room.hostSocketId) return;
+    if (!room.listeners.has(socket.id)) return;
+
+    const normalizedReaction = String(reaction || '').trim().slice(0, 4);
+    if (!normalizedReaction) return;
+
+    const updated = setListenerReaction(roomId, socket.id, normalizedReaction);
+    if (!updated) return;
+
+    io.to(room.hostSocketId).emit('listener:reaction', {
+      listenerId: socket.id,
+      reaction: normalizedReaction,
+      listenerEmail: socket.user?.email || null,
+      listenerName: socket.user?.email
+        ? socket.user.email.split('@')[0]
+        : (socket.user?.name || null),
+      listenerCount: room.listeners.size,
+    });
   });
 
   // Host controls

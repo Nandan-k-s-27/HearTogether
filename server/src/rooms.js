@@ -56,7 +56,7 @@ function deleteRoom(id) {
 function addListener(roomId, socketId) {
   const room = rooms.get(roomId);
   if (!room) return;
-  room.listeners.set(socketId, { joinedAt: Date.now() });
+  room.listeners.set(socketId, { joinedAt: Date.now(), reaction: null, reactedAt: null });
 }
 
 function removeListener(roomId, socketId) {
@@ -65,8 +65,31 @@ function removeListener(roomId, socketId) {
   room.listeners.delete(socketId);
 }
 
+function setListenerReaction(roomId, socketId, reaction) {
+  const room = rooms.get(roomId);
+  if (!room) return false;
+  const listener = room.listeners.get(socketId);
+  if (!listener) return false;
+  room.listeners.set(socketId, {
+    ...listener,
+    reaction,
+    reactedAt: Date.now(),
+  });
+  return true;
+}
+
 function getAllRooms() {
   return Array.from(rooms.values());
 }
 
-module.exports = { createRoom, createRoomWithId, getRoom, getRoomByCode, deleteRoom, addListener, removeListener, getAllRooms };
+module.exports = {
+  createRoom,
+  createRoomWithId,
+  getRoom,
+  getRoomByCode,
+  deleteRoom,
+  addListener,
+  removeListener,
+  setListenerReaction,
+  getAllRooms,
+};

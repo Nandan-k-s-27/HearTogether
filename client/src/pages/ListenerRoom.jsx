@@ -6,6 +6,9 @@ import { getIceServers, pingServer } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 
+const QUICK_REACTIONS = ['❤️', '👍', '👎', '😭', '😍'];
+const EXTRA_REACTIONS = ['👏', '🔥', '🎉', '😮', '🙏', '😂', '🤯', '💯'];
+
 export default function ListenerRoom() {
   const { code: roomCode } = useParams();
   const navigate = useNavigate();
@@ -19,6 +22,8 @@ export default function ListenerRoom() {
   // connState tracks actual WebRTC ICE/DTLS state (not just socket signaling)
   const [connState, setConnState] = useState('new'); // new|connecting|connected|disconnected|failed|closed
   const [iceServersConfig, setIceServersConfig] = useState(null);
+  const [selectedReaction, setSelectedReaction] = useState('');
+  const [showExtraReactions, setShowExtraReactions] = useState(false);
   // iceReady gates the socket join — we must not emit listener:join until the
   // ICE servers fetch has settled.  If the offer arrives before iceRef is
   // updated the RTCPeerConnection is created with STUN-only and TURN relay
@@ -229,6 +234,14 @@ export default function ListenerRoom() {
     navigate('/', { replace: true });
   };
 
+  const sendReaction = (reaction) => {
+    const emoji = String(reaction || '').trim();
+    if (!emoji || status === 'ended') return;
+    setSelectedReaction(emoji);
+    socket.emit('listener:reaction', { reaction: emoji });
+    setShowExtraReactions(false);
+  };
+
   const statusConfig = {
     connecting: { color: 'text-yellow-400', label: 'Connecting…' },
     listening: { color: 'text-green-400', label: 'Listening' },
@@ -332,6 +345,63 @@ export default function ListenerRoom() {
         )}
 
         {/* Actions */}
+        {status !== 'ended' && (
+          <div className="mb-4 rounded-xl border border-white/10 bg-white/5 p-3">
+            <p className="mb-3 text-xs uppercase tracking-wider text-gray-400">React to host</p>
+
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {QUICK_REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => sendReaction(emoji)}
+                  className={`rounded-lg border px-3 py-1.5 text-lg transition ${
+                    selectedReaction === emoji
+                      ? 'border-brand-400 bg-brand-500/20'
+                      : 'border-white/10 bg-black/20 hover:bg-white/10'
+                  }`}
+                  aria-label={`React with ${emoji}`}
+                >
+                  {emoji}
+                </button>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => setShowExtraReactions((v) => !v)}
+                className="rounded-lg border border-white/10 bg-black/20 px-3 py-1.5 text-sm font-semibold text-gray-200 transition hover:bg-white/10"
+                aria-label="More reactions"
+              >
+                +
+              </button>
+            </div>
+
+            {showExtraReactions && (
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-2 border-t border-white/10 pt-3">
+                {EXTRA_REACTIONS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => sendReaction(emoji)}
+                    className={`rounded-lg border px-3 py-1.5 text-lg transition ${
+                      selectedReaction === emoji
+                        ? 'border-brand-400 bg-brand-500/20'
+                        : 'border-white/10 bg-black/20 hover:bg-white/10'
+                    }`}
+                    aria-label={`React with ${emoji}`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {selectedReaction && (
+              <p className="mt-3 text-xs text-gray-400">Your current reaction: <span className="text-base">{selectedReaction}</span></p>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-col gap-3">
           {status === 'ended' ? (
             <ShimmerButton

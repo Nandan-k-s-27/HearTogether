@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage';
 import HostRoom from './pages/HostRoom';
 import ListenerRoom from './pages/ListenerRoom';
 import JoinPage from './pages/JoinPage';
+import AuthBootOverlay from './components/AuthBootOverlay';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -23,7 +24,7 @@ function ProtectedRoute({ children }) {
 }
 
 function AppRoutes() {
-  const { user } = useAuth();
+  const { user, authBootState } = useAuth();
 
   // Update socket auth when user changes
   useEffect(() => {
@@ -36,28 +37,32 @@ function AppRoutes() {
   }, [user]);
 
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<LandingPage />} />
-      <Route
-        path="/host/:roomId"
-        element={
-          <ProtectedRoute>
-            <HostRoom />
-          </ProtectedRoute>
-        }
-      />
-      <Route path="/room/:code" element={<JoinPage />} />
-      <Route
-        path="/listen/:code"
-        element={
-          <ProtectedRoute>
-            <ListenerRoom />
-          </ProtectedRoute>
-        }
-      />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/" element={<LandingPage />} />
+        <Route
+          path="/host/:roomId"
+          element={
+            <ProtectedRoute>
+              <HostRoom />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/room/:code" element={<JoinPage />} />
+        <Route
+          path="/listen/:code"
+          element={
+            <ProtectedRoute>
+              <ListenerRoom />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+
+      {authBootState.active && <AuthBootOverlay state={authBootState} />}
+    </>
   );
 }
 

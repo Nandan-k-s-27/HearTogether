@@ -104,6 +104,7 @@ export default function HostRoom() {
           id: listenerId,
           email: listenerEmail || null,
           name: listenerName || null,
+          reaction: null,
           joinedAt: Date.now(),
         }];
       });
@@ -139,11 +140,29 @@ export default function HostRoom() {
       createOffer(listenerId);
     };
 
+    const onListenerReaction = ({ listenerId, reaction, listenerEmail, listenerName }) => {
+      if (!listenerId || !reaction) return;
+
+      setListeners((prev) =>
+        prev.map((listener) =>
+          listener.id === listenerId
+            ? {
+                ...listener,
+                reaction,
+                email: listener.email || listenerEmail || null,
+                name: listener.name || listenerName || null,
+              }
+            : listener,
+        ),
+      );
+    };
+
     socket.on('listener:joined', onListenerJoined);
     socket.on('listener:left', onListenerLeft);
     socket.on('signal:answer', onAnswer);
     socket.on('signal:ice-candidate', onIce);
     socket.on('listener:request-offer', onRequestOffer);
+    socket.on('listener:reaction', onListenerReaction);
 
     return () => {
       socket.off('listener:joined', onListenerJoined);
@@ -151,6 +170,7 @@ export default function HostRoom() {
       socket.off('signal:answer', onAnswer);
       socket.off('signal:ice-candidate', onIce);
       socket.off('listener:request-offer', onRequestOffer);
+      socket.off('listener:reaction', onListenerReaction);
     };
   }, [stream, createOffer, handleAnswer, handleIceCandidate, removePeer]);
 
@@ -396,12 +416,17 @@ export default function HostRoom() {
                         {l.email && <div className="text-xs text-gray-400">{l.email}</div>}
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleRemoveListener(l.id)}
-                      className="text-xs text-red-400 hover:text-red-300 transition"
-                    >
-                      Remove
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <span className="min-w-8 text-center text-xl leading-none" title={l.reaction ? 'Latest reaction' : 'No reaction yet'}>
+                        {l.reaction || '·'}
+                      </span>
+                      <button
+                        onClick={() => handleRemoveListener(l.id)}
+                        className="text-xs text-red-400 hover:text-red-300 transition"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

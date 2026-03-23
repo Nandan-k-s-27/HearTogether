@@ -2,17 +2,18 @@ import { useAuth } from '../context/AuthContext';
 import { ShimmerButton } from './ui/shimmer-button';
 
 export function UserProfile() {
-  const { user, login, logout, switchAccount } = useAuth();
+  const { user, login, logout, switchAccount, authBootState } = useAuth();
 
   if (!user) {
     return (
       <ShimmerButton
         onClick={() => login()}
+        disabled={authBootState.active}
         background="rgba(20, 20, 30, 0.95)"
         shimmerColor="#5c7cfa"
-        className="dark:text-white text-xs sm:text-sm font-semibold px-3 py-1.5 sm:px-4 sm:py-2 whitespace-nowrap"
+        className="dark:text-white text-xs sm:text-sm font-semibold px-3 py-1.5 sm:px-4 sm:py-2 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-70"
       >
-        Sign In
+        {authBootState.active ? 'Starting...' : 'Sign In'}
       </ShimmerButton>
     );
   }

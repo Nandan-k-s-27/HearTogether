@@ -3,7 +3,7 @@ import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, authBootState } = useAuth();
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
@@ -17,11 +17,12 @@ export default function LoginPage() {
           <div className="space-y-4">
             <ShimmerButton
               onClick={login}
+              disabled={authBootState.active}
               background="rgba(20, 20, 30, 0.95)"
               shimmerColor="#5c7cfa"
-              className="dark:text-white w-full text-lg font-semibold py-3"
+              className="dark:text-white w-full text-lg font-semibold py-3 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              Sign in with Google
+              {authBootState.active ? 'Starting sign in...' : 'Sign in with Google'}
             </ShimmerButton>
 
             <p className="text-xs text-gray-500 px-4">
