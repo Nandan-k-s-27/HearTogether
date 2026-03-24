@@ -3,6 +3,18 @@ import axios from 'axios';
 import { BACKEND_URL } from '../lib/config';
 
 const AuthContext = createContext(null);
+const AUTH_IN_FLIGHT_KEY = 'auth_in_flight';
+
+const AUTH_CALLBACK_QUERY_KEYS = [
+  'auth_token',
+  'auth_error',
+  'code',
+  'state',
+  'scope',
+  'prompt',
+  'error',
+  'error_description',
+];
 
 function decodeJwtPayload(token) {
   try {
@@ -25,6 +37,29 @@ export function AuthProvider({ children }) {
   });
 
   const getStoredToken = () => localStorage.getItem('auth_token');
+
+  const hasKnownAuthCallbackParams = () => {
+    const params = new URLSearchParams(window.location.search);
+    return AUTH_CALLBACK_QUERY_KEYS.some((key) => params.has(key));
+  };
+
+  const sanitizeAuthCallbackUrl = () => {
+    const url = new URL(window.location.href);
+    let changed = false;
+
+    AUTH_CALLBACK_QUERY_KEYS.forEach((key) => {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      const nextSearch = url.searchParams.toString();
+      const cleanUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ''}${url.hash}`;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+  };
 
   // Check if user is authenticated on mount or when token changes
   useEffect(() => {
@@ -60,6 +95,8 @@ export function AuthProvider({ children }) {
     const params = new URLSearchParams(window.location.search);
     const token = params.get('auth_token');
     const authError = params.get('auth_error');
+    const hasAuthParams = hasKnownAuthCallbackParams();
+    const hadAuthFlowInFlight = sessionStorage.getItem(AUTH_IN_FLIGHT_KEY) === '1';
 
     if (token) {
       // Persist token on frontend origin for cross-domain API auth.
@@ -72,12 +109,13 @@ export function AuthProvider({ children }) {
       const returnTo = localStorage.getItem('post_auth_redirect');
       if (returnTo) {
         localStorage.removeItem('post_auth_redirect');
+        sessionStorage.removeItem(AUTH_IN_FLIGHT_KEY);
         window.location.replace(returnTo);
         return;
       }
 
-      // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname);
+      sanitizeAuthCallbackUrl();
+      sessionStorage.removeItem(AUTH_IN_FLIGHT_KEY);
       setAuthBootState({
         active: false,
         attempt: 0,
@@ -87,12 +125,19 @@ export function AuthProvider({ children }) {
 
     if (authError) {
       setError('Authentication failed. Please try again.');
-      window.history.replaceState({}, document.title, window.location.pathname);
+      sanitizeAuthCallbackUrl();
+      sessionStorage.removeItem(AUTH_IN_FLIGHT_KEY);
       setAuthBootState({
         active: false,
         attempt: 0,
         message: '',
       });
+    }
+
+    // Extra history guard for mobile/webview back-button edge cases.
+    if (!token && !authError && (hasAuthParams || hadAuthFlowInFlight)) {
+      sanitizeAuthCallbackUrl();
+      sessionStorage.removeItem(AUTH_IN_FLIGHT_KEY);
     }
   }, []);
 
@@ -100,6 +145,7 @@ export function AuthProvider({ children }) {
 
   const resetAuthState = () => {
     localStorage.removeItem('auth_token');
+    sessionStorage.removeItem(AUTH_IN_FLIGHT_KEY);
     setUser(null);
     setAuthBootState({
       active: false,
@@ -155,6 +201,8 @@ export function AuthProvider({ children }) {
     if (returnTo) {
       localStorage.setItem('post_auth_redirect', returnTo);
     }
+
+    sessionStorage.setItem(AUTH_IN_FLIGHT_KEY, '1');
 
     setError(null);
 
