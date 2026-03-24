@@ -15,6 +15,10 @@ export default function JoinPage() {
   const [loading, setLoading] = useState(true);
   const [authHint, setAuthHint] = useState('');
 
+  const maxListeners = room?.maxListeners ?? 30;
+  const listenerCount = room?.listenerCount ?? 0;
+  const isRoomFull = Boolean(room?.isFull || listenerCount >= maxListeners);
+
   useEffect(() => {
     if (!code) return;
     const upperCode = code.trim().toUpperCase();
@@ -28,6 +32,10 @@ export default function JoinPage() {
   }, [code]);
 
   const handleJoin = () => {
+    if (isRoomFull) {
+      setAuthHint(`Room is full (${listenerCount}/${maxListeners}). Please try again later.`);
+      return;
+    }
     if (!user) {
       setAuthHint('Please sign in to start listening.');
       return;
@@ -72,15 +80,19 @@ export default function JoinPage() {
           <p className="mb-1 text-sm text-gray-400">Room Code</p>
           <p className="text-3xl font-mono font-bold tracking-widest text-brand-400">{code?.toUpperCase()}</p>
           <p className="mt-4 text-sm text-gray-400">
-            {room?.listenerCount ?? 0} listener{room?.listenerCount !== 1 ? 's' : ''} connected
+            {listenerCount}/{maxListeners} listeners connected
           </p>
+          {isRoomFull && (
+            <p className="mt-2 text-xs text-red-300">Room is full. You cannot enter right now.</p>
+          )}
           <ShimmerButton
             onClick={handleJoin}
             background="rgba(76, 110, 245, 1)"
             shimmerColor="#ffffff"
-            className="dark:text-white mt-6 w-full text-lg font-semibold"
+            className="dark:text-white mt-6 w-full text-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isRoomFull}
           >
-            Start Listening
+            {isRoomFull ? 'Room Full' : 'Start Listening'}
           </ShimmerButton>
           {authHint && !user && (
             <div className="mt-3 rounded-lg border border-yellow-500/30 bg-yellow-900/20 px-3 py-2 text-xs text-yellow-300">

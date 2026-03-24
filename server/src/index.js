@@ -262,7 +262,15 @@ app.get('/api/rooms/:code', roomLookupLimiter, (req, res) => {
   const code = req.params.code.replace(/[^A-Za-z0-9]/g, '').slice(0, 20).toUpperCase();
   const room = getRoomByCode(code);
   if (!room) return res.status(404).json({ error: 'Room not found' });
-  res.json({ id: room.id, code: room.code, hostConnected: room.hostConnected, listenerCount: room.listeners.size });
+  const maxListeners = getMaxListeners();
+  res.json({
+    id: room.id,
+    code: room.code,
+    hostConnected: room.hostConnected,
+    listenerCount: room.listeners.size,
+    maxListeners,
+    isFull: room.listeners.size >= maxListeners,
+  });
 });
 
 // Socket.IO signaling - with authentication middleware
@@ -330,7 +338,12 @@ io.on('connection', (socket) => {
     socket.join(roomId);
     socket.data.role = 'host';
     socket.data.roomId = roomId;
-    cb?.({ ok: true, code: room.code });
+    cb?.({
+      ok: true,
+      code: room.code,
+      listenerCount: room.listeners.size,
+      maxListeners: getMaxListeners(),
+    });
     console.log(`[room ${room.code}] host joined`);
   });
 
@@ -351,7 +364,12 @@ io.on('connection', (socket) => {
     socket.data.role = 'listener';
     socket.data.roomId = room.id;
 
-    cb?.({ ok: true, roomId: room.id });
+    cb?.({
+      ok: true,
+      roomId: room.id,
+      listenerCount: room.listeners.size,
+      maxListeners,
+    });
 
     // Notify host about new listener
     io.to(room.hostSocketId).emit('listener:joined', {

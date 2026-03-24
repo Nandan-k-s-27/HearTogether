@@ -8,7 +8,6 @@ import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 import { UserProfile } from '../components/UserProfile';
 import { useToast, ToastContainer } from '../components/ui/toast';
-import { SkeletonBox } from '../components/ui/skeleton';
 import { debugLog, errorLog } from '../lib/logger';
 
 const CAPTURE_OPTIONS = [
@@ -29,6 +28,7 @@ export default function HostRoom() {
   const [iceServersConfig, setIceServersConfig] = useState(null);
   const [captureError, setCaptureError] = useState(null);
   const [listenerConnStates, setListenerConnStates] = useState({}); // listenerId -> connState
+  const [maxListeners, setMaxListeners] = useState(30);
 
   // Fetch TURN-capable ICE servers from backend as early as possible so they
   // are ready before the first listener joins and createOffer() is called.
@@ -46,9 +46,21 @@ export default function HostRoom() {
       errorLog(`[HostRoom] failed to fetch ICE servers:`, err);
       toast.warning('Could not load relay servers. Peer connections may be slower.');
     });
-  }, [toast]);
+  }, []);
 
-  const { createOffer, handleAnswer, handleIceCandidate, removePeer, closeAll } = useHostWebRTC(socket, stream, iceServersConfig);
+  const onPeerConnectionState = useCallback((listenerId, state) => {
+    setListenerConnStates((prev) => {
+      if (prev[listenerId] === state) return prev;
+      return { ...prev, [listenerId]: state };
+    });
+  }, []);
+
+  const { createOffer, handleAnswer, handleIceCandidate, removePeer, closeAll } = useHostWebRTC(
+    socket,
+    stream,
+    iceServersConfig,
+    { onPeerConnectionState },
+  );
   const syncInterval = useRef(null);
   // streamRef always holds the current stream — safe to use inside async callbacks
   // without worrying about stale closures over the `stream` state variable.
@@ -67,6 +79,27 @@ export default function HostRoom() {
         return;
       }
       setRoomCode(res.code);
+      if (res.maxListeners) setMaxListeners(res.maxListeners);
+
+      socket.emit('listener:request-messages', { roomId }, (historyRes) => {
+        if (!historyRes?.ok || !Array.isArray(historyRes.messages)) return;
+        setListeners((prev) => {
+          if (prev.length === 0) return prev;
+          return prev.map((listener) => {
+            const ownMessages = historyRes.messages
+              .filter((m) => m.socketId === listener.id)
+              .slice(-10)
+              .map((m) => ({ text: m.text, timestamp: m.timestamp }));
+            if (ownMessages.length === 0) return listener;
+            const latestTs = ownMessages[ownMessages.length - 1].timestamp;
+            return {
+              ...listener,
+              messages: ownMessages,
+              lastActivityAt: Math.max(listener.lastActivityAt || 0, latestTs || 0),
+            };
+          });
+        });
+      });
     });
 
     return () => {
@@ -115,6 +148,7 @@ export default function HostRoom() {
           reaction: null,
           messages: [],
           joinedAt: Date.now(),
+          lastActivityAt: Date.now(),
         }];
       });
       setListenerConnStates((prev) => ({ ...prev, [listenerId]: 'connecting' }));
@@ -159,33 +193,67 @@ export default function HostRoom() {
     const onListenerReaction = ({ listenerId, reaction, listenerEmail, listenerName }) => {
       if (!listenerId || !reaction) return;
 
-      setListeners((prev) =>
-        prev.map((listener) =>
+      setListeners((prev) => {
+        const exists = prev.some((listener) => listener.id === listenerId);
+        if (!exists) {
+          return [
+            ...prev,
+            {
+              id: listenerId,
+              email: listenerEmail || null,
+              name: listenerName || null,
+              reaction,
+              messages: [],
+              joinedAt: Date.now(),
+              lastActivityAt: Date.now(),
+            },
+          ];
+        }
+
+        return prev.map((listener) =>
           listener.id === listenerId
             ? {
                 ...listener,
                 reaction,
                 email: listener.email || listenerEmail || null,
                 name: listener.name || listenerName || null,
+                lastActivityAt: Date.now(),
               }
             : listener,
-        ),
-      );
+        );
+      });
     };
 
     const onListenerMessage = ({ listenerId, text, timestamp }) => {
       if (!listenerId || !text) return;
       debugLog(`[HostRoom] message from ${listenerId}: "${text.slice(0, 30)}..."`);
-      setListeners((prev) =>
-        prev.map((listener) =>
+      setListeners((prev) => {
+        const exists = prev.some((listener) => listener.id === listenerId);
+        if (!exists) {
+          return [
+            ...prev,
+            {
+              id: listenerId,
+              email: null,
+              name: null,
+              reaction: null,
+              messages: [{ text, timestamp }],
+              joinedAt: Date.now(),
+              lastActivityAt: Date.now(),
+            },
+          ];
+        }
+
+        return prev.map((listener) =>
           listener.id === listenerId
             ? {
                 ...listener,
                 messages: [...(listener.messages || []), { text, timestamp }].slice(-10), // keep last 10 messages
+                lastActivityAt: Date.now(),
               }
             : listener,
-        ),
-      );
+        );
+      });
     };
 
     socket.on('listener:joined', onListenerJoined);
@@ -311,16 +379,22 @@ export default function HostRoom() {
     }
   }, [toast]); // no other external deps needed — everything else is accessed via refs or stable socket
 
-  // When stream changes, send offers to any listeners already in the room.
+  // When stream starts (or listener membership changes), send offers only to
+  // listeners that are not yet connected. This avoids renegotiation storms when
+  // reactions/messages update listener UI state.
   useEffect(() => {
     if (stream && listeners.length > 0) {
-      debugLog(`[HostRoom] stream available, creating offers for ${listeners.length} listeners`);
+      debugLog(`[HostRoom] stream available, checking offers for ${listeners.length} listeners`);
       listeners.forEach((l) => {
-        debugLog(`[HostRoom] creating offer for listener ${l.id}`);
-        createOffer(l.id);
+        const state = listenerConnStates[l.id];
+        if (state !== 'connected' && state !== 'connecting') {
+          debugLog(`[HostRoom] creating offer for listener ${l.id}`);
+          setListenerConnStates((prev) => ({ ...prev, [l.id]: 'connecting' }));
+          createOffer(l.id);
+        }
       });
     }
-  }, [stream, listeners, createOffer]);
+  }, [stream, listeners, listenerConnStates, createOffer]);
 
   const handlePause = () => {
     if (paused) {
@@ -339,6 +413,12 @@ export default function HostRoom() {
     setListeners((prev) => prev.filter((l) => l.id !== listenerId));
     removePeer(listenerId);
   };
+
+  const sortedListeners = [...listeners].sort((a, b) => {
+    const aTs = a.lastActivityAt || a.joinedAt || 0;
+    const bTs = b.lastActivityAt || b.joinedAt || 0;
+    return bTs - aTs;
+  });
 
   const roomUrl = `${window.location.origin}/room/${roomCode}`;
 
@@ -455,14 +535,14 @@ export default function HostRoom() {
           {/* Listeners */}
           <GlowCard customSize glowColor="green" className="w-full">
             <h2 className="mb-4 text-lg font-semibold">
-              Listeners <span className="text-brand-400">({listeners.length})</span>
+              Listeners <span className="text-brand-400">({listeners.length}/{maxListeners})</span>
             </h2>
 
             {listeners.length === 0 ? (
               <p className="text-sm text-gray-500">No listeners yet. Share the QR code to invite people.</p>
             ) : (
               <ul className="flex flex-col gap-2">
-                {listeners.map((l) => {
+                {sortedListeners.map((l) => {
                   const connState = listenerConnStates[l.id] || 'new';
                   const connStateColor = connState === 'connected' 
                     ? 'text-green-400' 
@@ -493,6 +573,11 @@ export default function HostRoom() {
                         <div className="text-left min-w-0 flex-1">
                           <div className="text-sm font-semibold truncate">{l.name || l.email || `${l.id.slice(0, 8)}…`}</div>
                           <div className={`text-xs ${connStateColor} mt-0.5`}>{connStateLabel}</div>
+                          {l.messages?.length > 0 && (
+                            <div className="mt-1 text-xs text-blue-300 truncate" title={l.messages[l.messages.length - 1].text}>
+                              {l.messages[l.messages.length - 1].text}
+                            </div>
+                          )}
                           {l.email && <div className="text-xs text-gray-400">{l.email}</div>}
                         </div>
                       </div>

@@ -17,9 +17,14 @@ export default function ListenerRoom() {
   const { code: roomCode } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const toastRef = useRef(toast);
   const { lockPortrait, unlockOrientation } = useOrientationLock();
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
   const isMobile = isMobileDevice();
+
+  useEffect(() => {
+    toastRef.current = toast;
+  }, [toast]);
 
   const [status, setStatus] = useState('connecting'); // connecting | listening | paused | ended
   const [volume, setVolume] = useState(1);
@@ -44,6 +49,9 @@ export default function ListenerRoom() {
   const [iceLoadError, setIceLoadError] = useState(null);
   const [connError, setConnError] = useState(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [joinError, setJoinError] = useState('');
+  const [roomCapacity, setRoomCapacity] = useState(null);
+  const prevConnStateRef = useRef('new');
 
   // Fetch TURN-capable ICE servers FIRST, then join the room.
   useEffect(() => {
@@ -66,7 +74,7 @@ export default function ListenerRoom() {
       .catch((err) => {
         errorLog(`[ListenerRoom] failed to fetch ICE servers:`, err);
         setIceLoadError('Could not load ICE servers. Using fallback configuration.');
-        toast.warning('Connection may be slower without relay servers');
+        toastRef.current.warning('Connection may be slower without relay servers');
       })
       .finally(() => {
         debugLog(`[ListenerRoom] setting iceReady=true`);
@@ -136,7 +144,7 @@ export default function ListenerRoom() {
 
     let retries = 0;
     const MAX_RETRIES = 5;
-    const RETRY_DELAY = 2000; // ms
+    const RETRY_DELAY = 1200; // ms
 
     function tryJoin() {
       socket.emit('listener:join', { roomCode }, (res) => {
@@ -149,14 +157,24 @@ export default function ListenerRoom() {
             setTimeout(tryJoin, RETRY_DELAY * retries);
             return;
           }
-          alert(res.error);
+          if (String(res.error).toLowerCase().includes('full')) {
+            setJoinError(res.error);
+            setStatus('ended');
+            toastRef.current.error(res.error);
+            return;
+          }
+          toastRef.current.error(res.error || 'Could not join this room');
           // replace: true removes this room URL from history so pressing back
           // from home does not re-mount this component and attempt reconnect.
           navigate('/', { replace: true });
           return;
         }
         setStatus('listening');
+        setJoinError('');
         joinedRoomIdRef.current = res.roomId;
+        if (typeof res.listenerCount === 'number' && typeof res.maxListeners === 'number') {
+          setRoomCapacity({ listenerCount: res.listenerCount, maxListeners: res.maxListeners });
+        }
 
         // Recovery path: if first offer gets missed due to timing, ask host
         // to resend it a few times while still waiting for a remote track.
@@ -169,13 +187,13 @@ export default function ListenerRoom() {
             return;
           }
           offerRetryAttemptsRef.current += 1;
-          if (offerRetryAttemptsRef.current > 5) {
+          if (offerRetryAttemptsRef.current > 8) {
             clearOfferRetryTimer();
             return;
           }
           debugLog(`[ListenerRoom] no remote track yet, requesting offer retry #${offerRetryAttemptsRef.current}`);
           socket.emit('listener:request-offer', { roomId });
-        }, 2000);
+        }, 1200);
       });
     }
 
@@ -249,16 +267,19 @@ export default function ListenerRoom() {
 
   // Monitor connection state for errors
   useEffect(() => {
+    if (prevConnStateRef.current === connState) return;
+    prevConnStateRef.current = connState;
+
     if (connState === 'failed') {
       setConnError('WebRTC connection failed. ICE negotiation could not establish a path.');
-      toast.error('Connection failed — try leaving and rejoining the room');
+      toastRef.current.error('Connection failed - try leaving and rejoining the room');
     } else if (connState === 'disconnected') {
       setConnError('Connection interrupted. Attempting to recover…');
-      toast.warning('Connection lost, trying to reconnect');
+      toastRef.current.warning('Connection lost, trying to reconnect');
     } else if (connState === 'connected') {
       setConnError(null);
     }
-  }, [connState, toast]);
+  }, [connState]);
 
   // Mobile: Lock orientation and manage screen wake lock during listening
   useEffect(() => {
@@ -333,6 +354,9 @@ export default function ListenerRoom() {
           <div className="mb-6">
             <p className={`text-lg font-semibold ${s.color}`}>{s.label}</p>
             <p className="mt-1 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
+            {roomCapacity && (
+              <p className="mt-1 text-xs text-gray-400">Listeners: {roomCapacity.listenerCount}/{roomCapacity.maxListeners}</p>
+            )}
           </div>
         )}
         {status === 'connecting' && (
@@ -369,6 +393,23 @@ export default function ListenerRoom() {
             >
               Retry Connection
             </button>
+          </div>
+        )}
+
+        {joinError && (
+          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-red-300">Room is full</p>
+              <p className="text-xs text-red-200 mt-1">{joinError}</p>
+            </div>
+            <ShimmerButton
+              onClick={() => navigate(`/join/${roomCode?.toUpperCase()}`, { replace: true })}
+              background="rgba(20, 20, 30, 0.95)"
+              shimmerColor="#5c7cfa"
+              className="dark:text-white w-full font-semibold"
+            >
+              Back to Join Page
+            </ShimmerButton>
           </div>
         )}
 

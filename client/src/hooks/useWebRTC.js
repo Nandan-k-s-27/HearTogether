@@ -65,9 +65,13 @@ function normalizeIceConfig(config) {
 /**
  * Hook for the HOST side: creates a peer connection per listener and sends audio.
  */
-export function useHostWebRTC(socket, stream, iceServersConfig) {
+export function useHostWebRTC(socket, stream, iceServersConfig, { onPeerConnectionState } = {}) {
   const peers = useRef(new Map()); // listenerId -> RTCPeerConnection
+  const onPeerConnectionStateRef = useRef(onPeerConnectionState);
   const iceRef = useRef(normalizeIceConfig(iceServersConfig));
+  useEffect(() => {
+    onPeerConnectionStateRef.current = onPeerConnectionState;
+  }, [onPeerConnectionState]);
   useEffect(() => {
     iceRef.current = normalizeIceConfig(iceServersConfig);
   }, [iceServersConfig]);
@@ -116,6 +120,7 @@ export function useHostWebRTC(socket, stream, iceServersConfig) {
       let iceRestarts = 0;
       pc.onconnectionstatechange = () => {
         debugLog(`[WebRTC] host→${listenerId} connectionState: ${pc.connectionState}`);
+        onPeerConnectionStateRef.current?.(listenerId, pc.connectionState);
         if (pc.connectionState === 'failed' && iceRestarts < 3) {
           iceRestarts++;
           debugLog(`[WebRTC] host→${listenerId} failed – ICE restart #${iceRestarts}`);
