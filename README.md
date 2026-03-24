@@ -81,6 +81,10 @@ GOOGLE_CALLBACK_URL=http://localhost:3001/auth/google/callback
 
 JWT_SECRET=replace_with_a_long_random_secret
 
+# Room lifecycle (optional)
+# MAX_LISTENERS=100 (default: max listeners per room, prevents degradation from too many WebRTC peers)
+# ROOM_TTL_MS=3600000 (default: 60 min; rooms auto-expire after this inactivity period)
+
 # Optional TURN relay (recommended: ExpressTurn)
 # TURN_PROVIDER=ExpressTurn
 # EXPRESSTURN_URLS=turn:your-relay:3478,turn:your-relay:3478?transport=tcp,turns:your-relay:5349
@@ -132,6 +136,10 @@ GOOGLE_CLIENT_SECRET=...
 GOOGLE_CALLBACK_URL=https://your-backend.onrender.com/auth/google/callback
 JWT_SECRET=replace_with_a_long_random_secret
 PORT=3001
+
+# Room lifecycle safeguards (optional)
+MAX_LISTENERS=100 (listeners per room; default 100; prevents degradation from 50+ WebRTC peer connections)
+ROOM_TTL_MS=3600000 (room inactivity timeout; default 60 minutes; auto-expire stale rooms)
 
 # Optional TURN relay for reliable mobile/cellular audio
 TURN_PROVIDER=ExpressTurn

@@ -13,6 +13,9 @@ const {
   createRoomWithId,
   getRoom,
   deleteRoom,
+  touchRoom,
+  setMaxListeners,
+  getMaxListeners,
   addListener,
   removeListener,
   setListenerReaction,
@@ -92,14 +95,31 @@ const roomLookupLimiter = rateLimit({
   message: { error: 'Too many room lookups. Please try again later.' },
 });
 
-// Stale room cleanup: remove rooms older than 6 h with no active host
+// Room lifecycle configuration
 const SIX_HOURS = 6 * 60 * 60 * 1000;
+const MAX_TTL_MS = parseInt(process.env.ROOM_TTL_MS || String(60 * 60 * 1000), 10); // default 60 min
+const MAX_LISTENERS_PER_ROOM = parseInt(process.env.MAX_LISTENERS || '100', 10);
+
+setMaxListeners(MAX_LISTENERS_PER_ROOM);
+
+if (process.env.MAX_LISTENERS) {
+  console.log(`[config] max listeners per room: ${MAX_LISTENERS_PER_ROOM}`);
+}
+console.log(`[config] room TTL (inactivity): ${MAX_TTL_MS / 1000 / 60} minutes`);
+
+// Cleanup: remove stale rooms (no host for 6h) and inactive rooms (no activity for TTL)
 setInterval(() => {
   const now = Date.now();
   for (const room of getAllRooms()) {
+    // Stale (host disconnected for 6+ hours)
     if (!room.hostConnected && now - room.createdAt > SIX_HOURS) {
       deleteRoom(room.id);
-      console.log(`[cleanup] stale room ${room.code} removed`);
+      console.log(`[cleanup] stale room ${room.code} (no host for 6h) removed`);
+    }
+    // Inactive (no activity for TTL, room still exists)
+    else if (now - room.lastActivity > MAX_TTL_MS) {
+      deleteRoom(room.id);
+      console.log(`[cleanup] inactive room ${room.code} (TTL exceeded) removed`);
     }
   }
 }, 60 * 60 * 1000); // run every hour
@@ -318,6 +338,12 @@ io.on('connection', (socket) => {
     if (!room) return cb?.({ error: 'Room not found' });
     if (!room.hostConnected) return cb?.({ error: 'Host not connected' });
 
+    // Check listener limit
+    const maxListeners = getMaxListeners();
+    if (room.listeners.size >= maxListeners) {
+      return cb?.({ error: `Room is full (${maxListeners} listeners max)` });
+    }
+
     addListener(room.id, socket.id);
     socket.join(room.id);
     socket.data.role = 'listener';
@@ -333,11 +359,13 @@ io.on('connection', (socket) => {
       listenerCount: room.listeners.size,
     });
 
-    console.log(`[room ${room.code}] listener ${socket.id} joined (${room.listeners.size} total)`);
+    console.log(`[room ${room.code}] listener ${socket.id} joined (${room.listeners.size}/${maxListeners} total)`);
   });
 
   // WebRTC signaling
   socket.on('signal:offer', ({ to, offer }) => {
+    const { roomId } = socket.data;
+    if (roomId) touchRoom(roomId);
     console.log(`[signal] offer from ${socket.id} → ${to}`);
     if (!offer) {
       console.warn(`[signal] WARN: offer is empty or null from ${socket.id}`);
@@ -353,6 +381,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('signal:answer', ({ to, answer }) => {
+    const { roomId } = socket.data;
+    if (roomId) touchRoom(roomId);
     console.log(`[signal] answer from ${socket.id} → ${to}`);
     if (!answer) {
       console.warn(`[signal] WARN: answer is empty or null from ${socket.id}`);
@@ -363,6 +393,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('signal:ice-candidate', ({ to, candidate }) => {
+    const { roomId } = socket.data;
+    if (roomId) touchRoom(roomId);
     if (!candidate) {
       console.warn(`[signal] WARN: ice-candidate is empty or null from ${socket.id}`);
       return;
@@ -442,7 +474,10 @@ io.on('connection', (socket) => {
   // Sync: host broadcasts its timestamp periodically
   socket.on('sync:timestamp', ({ timestamp }) => {
     const { roomId } = socket.data;
-    if (roomId) socket.to(roomId).emit('sync:timestamp', { timestamp, serverTime: Date.now() });
+    if (roomId) {
+      touchRoom(roomId);
+      socket.to(roomId).emit('sync:timestamp', { timestamp, serverTime: Date.now() });
+    }
   });
 
   // Disconnect
@@ -474,4 +509,5 @@ server.listen(PORT, () => {
   console.log(`HearTogether server listening on port ${PORT}`);
   if (hasTurn) console.log(`[TURN] provider: ${TURN_PROVIDER} OK`);
   else console.log('[TURN] WARNING: no relay configured - mobile audio will fail');
+  console.log(`[lifecycle] max ${MAX_LISTENERS_PER_ROOM} listeners/room, ${MAX_TTL_MS / 1000 / 60} min inactivity TTL`);
 });
