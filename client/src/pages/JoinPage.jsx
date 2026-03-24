@@ -33,7 +33,10 @@ export default function JoinPage() {
     }
     // Always navigate with the room CODE. ListenerRoom sends it to the server
     // which looks up the room by code (getRoomByCode).
-    navigate(`/listen/${code.trim().toUpperCase()}`);
+    // replace: true prevents this join page from remaining in history.
+    // After a session ends and user goes home, pressing back should exit/app-switch
+    // instead of reopening stale room pages.
+    navigate(`/listen/${code.trim().toUpperCase()}`, { replace: true });
   };
 
   if (loading) {
