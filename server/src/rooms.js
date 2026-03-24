@@ -121,7 +121,7 @@ function addMessage(roomId, socketId, listenerEmail, listenerName, text) {
     socketId,
     listenerEmail,
     listenerName,
-    text: String(text || '').trim().slice(0, 500),
+    text: String(text || '').trim().slice(0, 50),
     timestamp: Date.now(),
   };
   room.messages.push(message);

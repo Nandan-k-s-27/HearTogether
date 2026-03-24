@@ -469,7 +469,7 @@ io.on('connection', (socket) => {
     if (!room || !room.hostSocketId) return;
     if (!room.listeners.has(socket.id)) return;
 
-    const normalizedText = String(text || '').trim().slice(0, 500);
+    const normalizedText = String(text || '').trim().slice(0, 50);
     if (!normalizedText) return;
 
     const message = addMessage(
@@ -490,7 +490,7 @@ io.on('connection', (socket) => {
       timestamp: message.timestamp,
     });
 
-    console.log(`[message] from ${socket.id}: "${normalizedText.slice(0, 30)}..."`);
+    console.log(`[message] from ${socket.id}: "${normalizedText}"`);
   });
 
   // Host requests message history when joining

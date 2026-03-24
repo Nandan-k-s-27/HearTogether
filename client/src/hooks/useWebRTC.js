@@ -62,6 +62,24 @@ function normalizeIceConfig(config) {
   };
 }
 
+async function optimizeAudioSender(sender, label) {
+  if (!sender || !sender.track || sender.track.kind !== 'audio') return;
+  if (typeof sender.getParameters !== 'function' || typeof sender.setParameters !== 'function') return;
+
+  try {
+    const params = sender.getParameters();
+    params.encodings = params.encodings && params.encodings.length > 0 ? params.encodings : [{}];
+    params.encodings[0].maxBitrate = 64000;
+    params.encodings[0].networkPriority = 'high';
+
+    await sender.setParameters(params);
+    debugLog(`[WebRTC] optimized audio sender params for ${label}`);
+  } catch (err) {
+    // Not all browsers support these sender parameters.
+    debugLog(`[WebRTC] audio sender optimization skipped for ${label}:`, err?.message || err);
+  }
+}
+
 /**
  * Hook for the HOST side: creates a peer connection per listener and sends audio.
  */
@@ -106,7 +124,8 @@ export function useHostWebRTC(socket, stream, iceServersConfig, { onPeerConnecti
         warnLog(`[WebRTC] WARNING: no audio tracks found in stream for ${listenerId}`);
       }
       audioTracks.forEach((track) => {
-        pc.addTrack(track, stream);
+        const sender = pc.addTrack(track, stream);
+        optimizeAudioSender(sender, `host→${listenerId}`);
       });
 
       pc.onicecandidate = (e) => {
@@ -118,20 +137,49 @@ export function useHostWebRTC(socket, stream, iceServersConfig, { onPeerConnecti
 
       // Auto-restart ICE when media path fails (network switch, timeout, etc.)
       let iceRestarts = 0;
+      let disconnectedTimer = null;
+      const triggerIceRestart = () => {
+        if (iceRestarts >= 3) return;
+        iceRestarts++;
+        debugLog(`[WebRTC] host→${listenerId} ICE restart #${iceRestarts}`);
+        pc.restartIce();
+        pc.createOffer({ iceRestart: true })
+          .then((o) => pc.setLocalDescription(o))
+          .then(() => socket.emit('signal:offer', { to: listenerId, offer: pc.localDescription }))
+          .catch((err) => errorLog('[WebRTC] ICE restart error:', err));
+      };
+
       pc.onconnectionstatechange = () => {
         debugLog(`[WebRTC] host→${listenerId} connectionState: ${pc.connectionState}`);
         onPeerConnectionStateRef.current?.(listenerId, pc.connectionState);
-        if (pc.connectionState === 'failed' && iceRestarts < 3) {
-          iceRestarts++;
-          debugLog(`[WebRTC] host→${listenerId} failed – ICE restart #${iceRestarts}`);
-          pc.restartIce();
-          pc.createOffer({ iceRestart: true })
-            .then((o) => pc.setLocalDescription(o))
-            .then(() => socket.emit('signal:offer', { to: listenerId, offer: pc.localDescription }))
-            .catch((err) => errorLog('[WebRTC] ICE restart error:', err));
+        if (pc.connectionState === 'disconnected') {
+          if (!disconnectedTimer) {
+            disconnectedTimer = setTimeout(() => {
+              disconnectedTimer = null;
+              if (pc.connectionState === 'disconnected') {
+                debugLog(`[WebRTC] host→${listenerId} still disconnected, forcing ICE restart`);
+                triggerIceRestart();
+              }
+            }, 3500);
+          }
+        } else if (pc.connectionState === 'failed') {
+          if (disconnectedTimer) {
+            clearTimeout(disconnectedTimer);
+            disconnectedTimer = null;
+          }
+          triggerIceRestart();
         } else if (pc.connectionState === 'connected') {
+          if (disconnectedTimer) {
+            clearTimeout(disconnectedTimer);
+            disconnectedTimer = null;
+          }
           iceRestarts = 0;
           debugLog(`[WebRTC] host→${listenerId} connected successfully`);
+        } else if (pc.connectionState === 'closed') {
+          if (disconnectedTimer) {
+            clearTimeout(disconnectedTimer);
+            disconnectedTimer = null;
+          }
         }
       };
 

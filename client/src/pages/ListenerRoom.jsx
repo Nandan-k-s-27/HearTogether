@@ -46,12 +46,12 @@ export default function ListenerRoom() {
   const [iceReady, setIceReady] = useState(false);
 
   // Error & retry states
-  const [iceLoadError, setIceLoadError] = useState(null);
   const [connError, setConnError] = useState(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const [joinError, setJoinError] = useState('');
   const [roomCapacity, setRoomCapacity] = useState(null);
   const prevConnStateRef = useRef('new');
+  const disconnectRecoveryTimerRef = useRef(null);
 
   // Fetch TURN-capable ICE servers FIRST, then join the room.
   useEffect(() => {
@@ -64,16 +64,13 @@ export default function ListenerRoom() {
           const stunCount = data.iceServers.filter(s => s.urls.toLowerCase().includes('stun')).length;
           debugLog(`[ListenerRoom] STUN=${stunCount}, TURN=${turnCount}`);
           setIceServersConfig({ iceServers: data.iceServers });
-          setIceLoadError(null);
         } else {
           warnLog(`[ListenerRoom] no iceServers in response`);
           // Still allow connection with default STUN servers
-          setIceLoadError(null);
         }
       })
       .catch((err) => {
         errorLog(`[ListenerRoom] failed to fetch ICE servers:`, err);
-        setIceLoadError('Could not load ICE servers. Using fallback configuration.');
         toastRef.current.warning('Connection may be slower without relay servers');
       })
       .finally(() => {
@@ -98,6 +95,13 @@ export default function ListenerRoom() {
       offerRetryTimerRef.current = null;
     }
     offerRetryAttemptsRef.current = 0;
+  }, []);
+
+  const clearDisconnectRecoveryTimer = useCallback(() => {
+    if (disconnectRecoveryTimerRef.current) {
+      clearTimeout(disconnectRecoveryTimerRef.current);
+      disconnectRecoveryTimerRef.current = null;
+    }
   }, []);
 
   // Stable callback ref — using useCallback avoids React's detach-reattach
@@ -201,11 +205,12 @@ export default function ListenerRoom() {
 
     return () => {
       clearOfferRetryTimer();
+      clearDisconnectRecoveryTimer();
       joinedRoomIdRef.current = null;
       close();
       socket.disconnect();
     };
-  }, [iceReady, roomCode, navigate, close, clearOfferRetryTimer, remoteStreamRef]);
+  }, [iceReady, roomCode, navigate, close, clearOfferRetryTimer, clearDisconnectRecoveryTimer, remoteStreamRef]);
 
   // Keep Render awake: ping /api/health every 8 minutes.
   useEffect(() => {
@@ -271,15 +276,25 @@ export default function ListenerRoom() {
     prevConnStateRef.current = connState;
 
     if (connState === 'failed') {
+      clearDisconnectRecoveryTimer();
       setConnError('WebRTC connection failed. ICE negotiation could not establish a path.');
       toastRef.current.error('Connection failed - try leaving and rejoining the room');
     } else if (connState === 'disconnected') {
       setConnError('Connection interrupted. Attempting to recover…');
       toastRef.current.warning('Connection lost, trying to reconnect');
+
+      clearDisconnectRecoveryTimer();
+      disconnectRecoveryTimerRef.current = setTimeout(() => {
+        const roomId = joinedRoomIdRef.current;
+        if (!roomId || connState === 'connected') return;
+        debugLog('[ListenerRoom] disconnected persisted, requesting fresh offer');
+        socket.emit('listener:request-offer', { roomId });
+      }, 1200);
     } else if (connState === 'connected') {
+      clearDisconnectRecoveryTimer();
       setConnError(null);
     }
-  }, [connState]);
+  }, [connState, clearDisconnectRecoveryTimer]);
 
   // Mobile: Lock orientation and manage screen wake lock during listening
   useEffect(() => {
@@ -298,6 +313,7 @@ export default function ListenerRoom() {
 
   const handleLeave = () => {
     clearOfferRetryTimer();
+    clearDisconnectRecoveryTimer();
     close();
     socket.disconnect();
     // replace: true removes this room URL from history so pressing the device
@@ -341,7 +357,10 @@ export default function ListenerRoom() {
   const s = statusConfig[status];
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4 md:px-6 py-6 md:py-0">
+    <div
+      className="flex min-h-screen flex-col items-center justify-start md:justify-center overflow-y-auto px-4 md:px-6 py-6 md:py-0"
+      style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
+    >
       <ToastContainer toasts={toast.toasts} onRemove={toast.removeToast} />
       <GlowCard customSize glowColor="blue" className="w-full max-w-md text-center">
         <div className={isMobile ? 'px-4 py-6' : 'px-6 py-8'}>
@@ -512,6 +531,7 @@ export default function ListenerRoom() {
                       ? 'border-brand-400 bg-brand-500/20'
                       : 'border-white/10 bg-black/20 hover:bg-white/10'
                   } ${isMobile ? 'px-4 py-3 text-2xl' : 'px-3 py-1.5 text-lg'}`}
+                  style={{ touchAction: 'manipulation' }}
                   aria-label={`React with ${emoji}`}
                 >
                   {emoji}
@@ -524,6 +544,7 @@ export default function ListenerRoom() {
                 className={`rounded-lg border border-white/10 bg-black/20 font-semibold text-gray-200 transition hover:bg-white/10 ${
                   isMobile ? 'px-4 py-3 text-lg' : 'px-3 py-1.5 text-sm'
                 }`}
+                style={{ touchAction: 'manipulation' }}
                 aria-label="More reactions"
               >
                 +
@@ -542,6 +563,7 @@ export default function ListenerRoom() {
                         ? 'border-brand-400 bg-brand-500/20'
                         : 'border-white/10 bg-black/20 hover:bg-white/10'
                     } ${isMobile ? 'px-4 py-3 text-2xl' : 'px-3 py-1.5 text-lg'}`}
+                    style={{ touchAction: 'manipulation' }}
                     aria-label={`React with ${emoji}`}
                   >
                     {emoji}
@@ -575,7 +597,7 @@ export default function ListenerRoom() {
                   <input 
                     type="text" 
                     value={chatMessage} 
-                    onChange={(e) => setChatMessage(e.target.value.slice(0, 500))} 
+                    onChange={(e) => setChatMessage(e.target.value.slice(0, 50))} 
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} 
                     placeholder="Say something..." 
                     className={`rounded-lg border border-white/20 bg-black/40 text-white placeholder-gray-500 focus:outline-none focus:border-brand-400 ${
@@ -583,7 +605,7 @@ export default function ListenerRoom() {
                         ? 'px-4 py-3 text-base flex-1' 
                         : 'px-3 py-2 text-xs'
                     }` } 
-                    maxLength="500" 
+                    maxLength="50" 
                   />
                   <button 
                     type="button" 
@@ -598,7 +620,7 @@ export default function ListenerRoom() {
                     Send
                   </button>
                 </div>
-                <p className={`text-gray-500 ${isMobile ? 'text-sm' : 'text-xs'}`}>{chatMessage.length}/500</p>
+                <p className={`text-gray-500 ${isMobile ? 'text-sm' : 'text-xs'}`}>{chatMessage.length}/50</p>
               </div>
             )}
           </div>
