@@ -88,6 +88,16 @@ export function AuthProvider({ children }) {
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  const resetAuthState = () => {
+    localStorage.removeItem('auth_token');
+    setUser(null);
+    setAuthBootState({
+      active: false,
+      attempt: 0,
+      message: '',
+    });
+  };
+
   const waitForBackend = async () => {
     const timeoutMs = 75_000;
     const intervalMs = 2_500;
@@ -155,14 +165,15 @@ export function AuthProvider({ children }) {
   };
 
   const switchAccount = async () => {
-    localStorage.removeItem('auth_token');
-    setUser(null);
+    resetAuthState();
     await login({ prompt: 'select_account' });
   };
 
   const logout = async () => {
+    const token = getStoredToken();
+    resetAuthState();
+
     try {
-      const token = getStoredToken();
       await axios.post(
         `${BACKEND_URL}/auth/logout`,
         {},
@@ -171,8 +182,6 @@ export function AuthProvider({ children }) {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         },
       );
-      setUser(null);
-      localStorage.removeItem('auth_token');
     } catch (err) {
       console.error('Logout failed:', err);
     }

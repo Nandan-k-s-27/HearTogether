@@ -80,28 +80,26 @@ export function UserProfile() {
           </div>
 
           <div className="flex items-center gap-2">
-            <ShimmerButton
+            <button
+              type="button"
               onClick={() => {
                 setOpen(false);
                 switchAccount();
               }}
-              background="rgba(20, 20, 30, 0.95)"
-              shimmerColor="#5c7cfa"
-              className="dark:text-white flex-1 text-[11px] sm:text-xs font-semibold px-2.5 py-1 whitespace-nowrap"
+              className="flex-1 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/10"
             >
               Switch
-            </ShimmerButton>
-            <ShimmerButton
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 setOpen(false);
                 logout();
               }}
-              background="rgba(220, 38, 38, 1)"
-              shimmerColor="#ffffff"
-              className="dark:text-white flex-1 text-[11px] sm:text-xs font-semibold px-2.5 py-1 whitespace-nowrap"
+              className="flex-1 rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-2 text-xs font-semibold text-red-100 transition hover:bg-red-500/25"
             >
               Logout
-            </ShimmerButton>
+            </button>
           </div>
         </div>
       )}
