@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 import { BACKEND_URL } from '../lib/config';
+import { errorLog } from '../lib/logger';
 
 const AuthContext = createContext(null);
 const AUTH_IN_FLIGHT_KEY = 'auth_in_flight';
@@ -80,7 +81,7 @@ export function AuthProvider({ children }) {
           setUser(null);
         }
       } catch (err) {
-        console.error('Auth check failed:', err);
+        errorLog('Auth check failed:', err);
         setUser(null);
       } finally {
         setLoading(false);
@@ -242,7 +243,7 @@ export function AuthProvider({ children }) {
         },
       );
     } catch (err) {
-      console.error('Logout failed:', err);
+      errorLog('Logout failed:', err);
     }
   };
 

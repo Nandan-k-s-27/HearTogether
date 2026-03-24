@@ -103,7 +103,7 @@ export default function ListenerRoom() {
       })
       .catch((err) => {
         // Should never reach here inside a gesture handler, but log just in case.
-        console.error('[HearTogether] play() failed:', err.name, err.message);
+        errorLog('[HearTogether] play() failed:', err.name, err.message);
       });
   }, [volume, remoteStreamRef]);
 

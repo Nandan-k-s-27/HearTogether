@@ -9,7 +9,7 @@ HearTogether is a real-time web audio sharing app. One user hosts audio, listene
 - Post-login deep-link resume: listeners return directly to their intended room after OAuth.
 - Host dashboard with pause/resume/stop, per-listener remove, and listener identity (email-based).
 - System audio capture (tab/window/screen) and microphone capture options.
-- Compact avatar account menu: users see only the Google profile circle until clicked.
+- Stable account controls: signed-in users always see account identity and direct Switch/Logout actions.
 - Hardened backend with CORS allowlist, helmet headers, rate limiting, and stale-room cleanup.
 
 ## Tech Stack
@@ -182,6 +182,14 @@ Rooms:
 - Socket.IO parser is pinned to a patched version via npm overrides.
 - Client currently has a moderate Vite/esbuild advisory that requires a major Vite upgrade to fully remove.
 - Mitigation: do not expose the Vite dev server publicly. Keep local development on localhost/private network and deploy only the production build.
+
+## Operational Safeguards
+
+- Auth history guard is enabled on app boot to sanitize OAuth callback query params and reduce stale back-button states on mobile/webview browsers.
+- Room APIs are rate limited on the backend to reduce abuse:
+	- `POST /api/rooms`: 30 requests per 10 minutes per IP
+	- `GET /api/rooms/:code`: 120 requests per 5 minutes per IP
+- Stale rooms are cleaned up automatically by the backend (hourly pass for disconnected rooms older than 6 hours).
 
 ## Troubleshooting
 

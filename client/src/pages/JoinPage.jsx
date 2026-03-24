@@ -4,6 +4,7 @@ import { getRoomInfo } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 import { useAuth } from '../context/AuthContext';
+import { errorLog } from '../lib/logger';
 
 export default function JoinPage() {
   const { code } = useParams();
@@ -20,7 +21,7 @@ export default function JoinPage() {
     getRoomInfo(upperCode)
       .then(setRoom)
       .catch((err) => {
-        console.error('Room info error:', err);
+        errorLog('Room info error:', err);
         setError('Room not found or has ended.');
       })
       .finally(() => setLoading(false));
