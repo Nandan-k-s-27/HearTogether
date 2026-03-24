@@ -435,6 +435,7 @@ io.on('connection', (socket) => {
       code: room.code,
       listenerCount: room.listeners.size,
       maxListeners: getMaxListeners(),
+      sessionLimitMs: MAX_TTL_MS,
     });
     console.log(`[room ${room.code}] host joined`);
   });

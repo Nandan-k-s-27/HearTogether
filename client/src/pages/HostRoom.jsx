@@ -15,6 +15,13 @@ const CAPTURE_OPTIONS = [
   { id: 'mic', label: 'Microphone', desc: 'Broadcast live microphone input' },
 ];
 
+function formatDuration(seconds) {
+  const safe = Math.max(0, Number(seconds) || 0);
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
 export default function HostRoom() {
   const { roomId } = useParams();
   const navigate = useNavigate();
@@ -29,6 +36,10 @@ export default function HostRoom() {
   const [captureError, setCaptureError] = useState(null);
   const [listenerConnStates, setListenerConnStates] = useState({}); // listenerId -> connState
   const [maxListeners, setMaxListeners] = useState(30);
+  const [sessionLimitMs, setSessionLimitMs] = useState(60 * 60 * 1000);
+  const [sessionRemainingSec, setSessionRemainingSec] = useState(60 * 60);
+  const sessionStartedAtRef = useRef(null);
+  const sessionWarningMarksRef = useRef(new Set());
 
   // Fetch TURN-capable ICE servers from backend as early as possible so they
   // are ready before the first listener joins and createOffer() is called.
@@ -80,6 +91,10 @@ export default function HostRoom() {
       }
       setRoomCode(res.code);
       if (res.maxListeners) setMaxListeners(res.maxListeners);
+      if (typeof res.sessionLimitMs === 'number' && res.sessionLimitMs > 0) {
+        setSessionLimitMs(res.sessionLimitMs);
+        setSessionRemainingSec(Math.floor(res.sessionLimitMs / 1000));
+      }
 
       socket.emit('listener:request-messages', { roomId }, (historyRes) => {
         if (!historyRes?.ok || !Array.isArray(historyRes.messages)) return;
@@ -121,6 +136,12 @@ export default function HostRoom() {
         }
         // Server may have assigned a new code after the restart — update QR / display.
         setRoomCode(res.code);
+        if (typeof res.sessionLimitMs === 'number' && res.sessionLimitMs > 0) {
+          setSessionLimitMs(res.sessionLimitMs);
+          if (!streamRef.current) {
+            setSessionRemainingSec(Math.floor(res.sessionLimitMs / 1000));
+          }
+        }
       });
     };
     socket.io.on('reconnect', onReconnect);
@@ -286,6 +307,9 @@ export default function HostRoom() {
     setStream(null);
     setStreaming(false);
     setPaused(false);
+    sessionStartedAtRef.current = null;
+    sessionWarningMarksRef.current.clear();
+    setSessionRemainingSec(Math.floor(sessionLimitMs / 1000));
     closeAll();
     if (syncInterval.current) {
       clearInterval(syncInterval.current);
@@ -295,11 +319,43 @@ export default function HostRoom() {
     // replace: true removes /host/:roomId from history so pressing back from
     // home does not re-mount this component and attempt to rejoin the room.
     navigate('/', { replace: true });
-  }, [navigate, closeAll]);
+  }, [navigate, closeAll, sessionLimitMs]);
 
   // Keep the ref pointing at the latest handleStop so capture-time listeners
   // don't hold a stale closure.
   handleStopRef.current = handleStop;
+
+  useEffect(() => {
+    if (!streaming || !sessionStartedAtRef.current) {
+      return;
+    }
+
+    const updateCountdown = () => {
+      const now = Date.now();
+      const elapsedMs = now - sessionStartedAtRef.current;
+      const remainingMs = Math.max(0, sessionLimitMs - elapsedMs);
+      const remainingSec = Math.ceil(remainingMs / 1000);
+
+      setSessionRemainingSec(remainingSec);
+
+      // Notify host near expiry so they can wrap up gracefully.
+      [10 * 60, 5 * 60, 60].forEach((mark) => {
+        if (remainingSec <= mark && !sessionWarningMarksRef.current.has(mark)) {
+          sessionWarningMarksRef.current.add(mark);
+          toast.warning(`Session ends in ${formatDuration(mark)}`);
+        }
+      });
+
+      if (remainingSec <= 0) {
+        toast.error('60-minute session limit reached. Stopping broadcast.');
+        handleStopRef.current?.();
+      }
+    };
+
+    updateCountdown();
+    const id = setInterval(updateCountdown, 1000);
+    return () => clearInterval(id);
+  }, [streaming, sessionLimitMs, toast]);
 
   // Start capturing audio
   const startCapture = useCallback(async (type) => {
@@ -375,6 +431,9 @@ export default function HostRoom() {
       setStream(mediaStream);
       setStreaming(true);
       setPaused(false);
+      sessionStartedAtRef.current = Date.now();
+      sessionWarningMarksRef.current.clear();
+      setSessionRemainingSec(Math.ceil(sessionLimitMs / 1000));
       setCaptureError(null);
       toast.success('Audio capture started');
 
@@ -392,7 +451,7 @@ export default function HostRoom() {
       setCaptureError(errorMsg);
       toast.error(errorMsg);
     }
-  }, [toast]); // no other external deps needed — everything else is accessed via refs or stable socket
+  }, [toast, sessionLimitMs]); // no other external deps needed — everything else is accessed via refs or stable socket
 
   // When stream starts (or listener membership changes), send offers only to
   // listeners that are not yet connected. This avoids renegotiation storms when
@@ -492,6 +551,32 @@ export default function HostRoom() {
           {/* Broadcast Controls */}
           <GlowCard customSize glowColor="purple" className="w-full">
             <h2 className="mb-4 text-lg font-semibold">Broadcast</h2>
+
+            <div className={`mb-4 rounded-lg border px-4 py-3 ${
+              streaming
+                ? sessionRemainingSec <= 60
+                  ? 'border-red-500/40 bg-red-900/20'
+                  : sessionRemainingSec <= 5 * 60
+                  ? 'border-yellow-500/40 bg-yellow-900/20'
+                  : 'border-blue-500/30 bg-blue-900/20'
+                : 'border-white/10 bg-white/5'
+            }`}>
+              <p className="text-xs uppercase tracking-wider text-gray-400">Session Timer</p>
+              <p className={`mt-1 font-mono text-2xl font-bold ${
+                streaming
+                  ? sessionRemainingSec <= 60
+                    ? 'text-red-300'
+                    : sessionRemainingSec <= 5 * 60
+                    ? 'text-yellow-300'
+                    : 'text-blue-300'
+                  : 'text-gray-200'
+              }`}>
+                {formatDuration(sessionRemainingSec)}
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                One session is limited to {Math.floor(sessionLimitMs / 60000)} minutes.
+              </p>
+            </div>
 
           {captureError && (
               <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3">
