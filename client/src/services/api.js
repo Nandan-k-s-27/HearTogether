@@ -1,11 +1,12 @@
 import axios from 'axios';
 import { BACKEND_URL } from '../lib/config';
+import { debugLog } from '../lib/logger';
 
 const API_BASE = `${BACKEND_URL}/api`;
 
 // Log in development
 if (import.meta.env.DEV) {
-  console.log('[API] BACKEND_URL:', BACKEND_URL);
+  debugLog('[API] BACKEND_URL:', BACKEND_URL);
 }
 
 // Create axios instance with default config
@@ -39,7 +40,7 @@ export async function getRoomInfo(code) {
   try {
     const res = await api.get(`/rooms/${encodeURIComponent(code)}`);
     return res.data;
-  } catch (err) {
+  } catch {
     throw new Error('Room not found');
   }
 }

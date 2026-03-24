@@ -5,6 +5,7 @@ import { useListenerWebRTC } from '../hooks/useWebRTC';
 import { getIceServers, pingServer } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
+import { debugLog, warnLog, errorLog } from '../lib/logger';
 
 const QUICK_REACTIONS = ['❤️', '👍', '👎', '😭', '😍'];
 const EXTRA_REACTIONS = ['👏', '🔥', '🎉', '😮', '🙏', '😂', '🤯', '💯'];
@@ -32,22 +33,22 @@ export default function ListenerRoom() {
 
   // Fetch TURN-capable ICE servers FIRST, then join the room.
   useEffect(() => {
-    console.log(`[ListenerRoom] fetching ICE servers`);
+    debugLog(`[ListenerRoom] fetching ICE servers`);
     getIceServers()
       .then((data) => {
         if (data?.iceServers) {
-          console.log(`[ListenerRoom] ICE servers loaded:`, data.iceServers);
+          debugLog(`[ListenerRoom] ICE servers loaded:`, data.iceServers);
           const turnCount = data.iceServers.filter(s => s.urls.toLowerCase().includes('turn')).length;
           const stunCount = data.iceServers.filter(s => s.urls.toLowerCase().includes('stun')).length;
-          console.log(`[ListenerRoom] STUN=${stunCount}, TURN=${turnCount}`);
+          debugLog(`[ListenerRoom] STUN=${stunCount}, TURN=${turnCount}`);
           setIceServersConfig({ iceServers: data.iceServers });
         } else {
-          console.warn(`[ListenerRoom] no iceServers in response`);
+          warnLog(`[ListenerRoom] no iceServers in response`);
         }
       })
-      .catch((err) => console.error(`[ListenerRoom] failed to fetch ICE servers:`, err))
+      .catch((err) => errorLog(`[ListenerRoom] failed to fetch ICE servers:`, err))
       .finally(() => {
-        console.log(`[ListenerRoom] setting iceReady=true`);
+        debugLog(`[ListenerRoom] setting iceReady=true`);
         setIceReady(true);
       });
   }, []);
@@ -151,7 +152,7 @@ export default function ListenerRoom() {
             clearOfferRetryTimer();
             return;
           }
-          console.log(`[ListenerRoom] no remote track yet, requesting offer retry #${offerRetryAttemptsRef.current}`);
+          debugLog(`[ListenerRoom] no remote track yet, requesting offer retry #${offerRetryAttemptsRef.current}`);
           socket.emit('listener:request-offer', { roomId });
         }, 2000);
       });
@@ -176,33 +177,33 @@ export default function ListenerRoom() {
   // Signaling events
   useEffect(() => {
     const onOffer = ({ from, offer }) => {
-      console.log(`[ListenerRoom] received offer from ${from}`);
+      debugLog(`[ListenerRoom] received offer from ${from}`);
       clearOfferRetryTimer();
       handleOffer(from, offer);
       setStatus('listening');
     };
 
     const onIce = ({ from, candidate }) => {
-      console.log(`[ListenerRoom] received ice-candidate from ${from}`);
+      debugLog(`[ListenerRoom] received ice-candidate from ${from}`);
       handleIceCandidate(from, candidate);
     };
 
     const onPaused = () => {
-      console.log(`[ListenerRoom] host paused`);
+      debugLog(`[ListenerRoom] host paused`);
       setStatus('paused');
     };
     const onResumed = () => {
-      console.log(`[ListenerRoom] host resumed`);
+      debugLog(`[ListenerRoom] host resumed`);
       setStatus('listening');
     };
     const onStopped = () => {
-      console.log(`[ListenerRoom] host stopped`);
+      debugLog(`[ListenerRoom] host stopped`);
       setStatus('ended');
       clearOfferRetryTimer();
       close();
     };
     const onRemoved = () => {
-      console.log(`[ListenerRoom] removed by host`);
+      debugLog(`[ListenerRoom] removed by host`);
       setStatus('ended');
       clearOfferRetryTimer();
       close();

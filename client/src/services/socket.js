@@ -1,9 +1,10 @@
 import { io } from 'socket.io-client';
 import { BACKEND_URL } from '../lib/config';
+import { debugLog } from '../lib/logger';
 
 // Log in development
 if (import.meta.env.DEV) {
-  console.log('[Socket] BACKEND_URL:', BACKEND_URL);
+  debugLog('[Socket] BACKEND_URL:', BACKEND_URL);
 }
 
 const socket = io(BACKEND_URL, {

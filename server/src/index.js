@@ -244,8 +244,30 @@ app.get('/api/rooms/:code', roomLookupLimiter, (req, res) => {
 });
 
 // Socket.IO signaling - with authentication middleware
+function getTokenFromCookieHeader(cookieHeader) {
+  if (!cookieHeader) return null;
+  const entries = String(cookieHeader)
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  for (const entry of entries) {
+    const [key, ...rest] = entry.split('=');
+    if (key !== 'auth_token') continue;
+    const raw = rest.join('=');
+    if (!raw) return null;
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }
+
+  return null;
+}
+
 io.use((socket, next) => {
-  const token = socket.handshake.auth.token || socket.handshake.headers.cookie?.split('auth_token=')[1]?.split(';')[0];
+  const token = socket.handshake.auth?.token || getTokenFromCookieHeader(socket.handshake.headers?.cookie);
   if (!token) {
     return next(new Error('No authentication token'));
   }

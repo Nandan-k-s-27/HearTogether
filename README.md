@@ -9,7 +9,7 @@ HearTogether is a real-time web audio sharing app. One user hosts audio, listene
 - Post-login deep-link resume: listeners return directly to their intended room after OAuth.
 - Host dashboard with pause/resume/stop, per-listener remove, and listener identity (email-based).
 - System audio capture (tab/window/screen) and microphone capture options.
-- Mobile-friendly top controls (sign-in/theme/switch/logout) with responsive wrapping.
+- Compact avatar account menu: users see only the Google profile circle until clicked.
 - Hardened backend with CORS allowlist, helmet headers, rate limiting, and stale-room cleanup.
 
 ## Tech Stack
@@ -93,6 +93,8 @@ Client (`client/.env`):
 
 ```env
 VITE_BACKEND_URL=http://localhost:3001
+# Optional: set to true/1 to keep verbose WebRTC debug logs in production
+# VITE_ENABLE_DEBUG_LOGS=true
 ```
 
 ### 3) Run

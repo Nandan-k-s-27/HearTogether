@@ -7,6 +7,7 @@ import { getIceServers, pingServer } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 import { UserProfile } from '../components/UserProfile';
+import { debugLog, errorLog } from '../lib/logger';
 
 const CAPTURE_OPTIONS = [
   { id: 'display', label: 'System Audio (Tab / Window / Screen)', desc: 'Share audio from a browser tab, app window, or entire screen' },
@@ -28,16 +29,16 @@ export default function HostRoom() {
   // Fetch TURN-capable ICE servers from backend as early as possible so they
   // are ready before the first listener joins and createOffer() is called.
   useEffect(() => {
-    console.log(`[HostRoom] fetching ICE servers on mount`);
+    debugLog(`[HostRoom] fetching ICE servers on mount`);
     getIceServers().then((data) => {
       if (data?.iceServers) {
-        console.log(`[HostRoom] ICE servers loaded:`, data.iceServers);
+        debugLog(`[HostRoom] ICE servers loaded:`, data.iceServers);
         const turnCount = data.iceServers.filter(s => s.urls.toLowerCase().includes('turn')).length;
         const stunCount = data.iceServers.filter(s => s.urls.toLowerCase().includes('stun')).length;
-        console.log(`[HostRoom] STUN=${stunCount}, TURN=${turnCount}`);
+        debugLog(`[HostRoom] STUN=${stunCount}, TURN=${turnCount}`);
         setIceServersConfig({ iceServers: data.iceServers });
       }
-    }).catch(err => console.error(`[HostRoom] failed to fetch ICE servers:`, err));
+    }).catch(err => errorLog(`[HostRoom] failed to fetch ICE servers:`, err));
   }, []);
 
   const { createOffer, handleAnswer, handleIceCandidate, removePeer, closeAll } = useHostWebRTC(socket, stream, iceServersConfig);
@@ -97,7 +98,7 @@ export default function HostRoom() {
   // Listen for signaling events
   useEffect(() => {
     const onListenerJoined = ({ listenerId, listenerEmail, listenerName }) => {
-      console.log(`[HostRoom] listener joined: ${listenerId} (${listenerEmail})`);
+      debugLog(`[HostRoom] listener joined: ${listenerId} (${listenerEmail})`);
       setListeners((prev) => {
         if (prev.some((l) => l.id === listenerId)) return prev;
         return [...prev, {
@@ -109,34 +110,34 @@ export default function HostRoom() {
         }];
       });
       if (stream) {
-        console.log(`[HostRoom] stream exists, creating offer for ${listenerId}`);
+        debugLog(`[HostRoom] stream exists, creating offer for ${listenerId}`);
         createOffer(listenerId);
       } else {
-        console.log(`[HostRoom] stream not ready yet, deferring offer creation for ${listenerId}`);
+        debugLog(`[HostRoom] stream not ready yet, deferring offer creation for ${listenerId}`);
       }
     };
 
     const onListenerLeft = ({ listenerId }) => {
-      console.log(`[HostRoom] listener left: ${listenerId}`);
+      debugLog(`[HostRoom] listener left: ${listenerId}`);
       setListeners((prev) => prev.filter((l) => l.id !== listenerId));
       removePeer(listenerId);
     };
 
     const onAnswer = ({ from, answer }) => {
-      console.log(`[HostRoom] received answer from ${from}`);
+      debugLog(`[HostRoom] received answer from ${from}`);
       handleAnswer(from, answer);
     };
     const onIce = ({ from, candidate }) => {
-      console.log(`[HostRoom] received ice-candidate from ${from}`);
+      debugLog(`[HostRoom] received ice-candidate from ${from}`);
       handleIceCandidate(from, candidate);
     };
     const onRequestOffer = ({ listenerId }) => {
       if (!listenerId) return;
       if (!streamRef.current) {
-        console.log(`[HostRoom] offer retry requested by ${listenerId}, but stream is not active`);
+        debugLog(`[HostRoom] offer retry requested by ${listenerId}, but stream is not active`);
         return;
       }
-      console.log(`[HostRoom] offer retry requested by ${listenerId}; resending offer`);
+      debugLog(`[HostRoom] offer retry requested by ${listenerId}; resending offer`);
       createOffer(listenerId);
     };
 
@@ -261,7 +262,7 @@ export default function HostRoom() {
         socket.emit('sync:timestamp', { timestamp: Date.now() });
       }, 5000);
     } catch (err) {
-      console.error('Capture failed:', err);
+      errorLog('Capture failed:', err);
       setCaptureError('Could not capture audio. Please make sure you grant the required permissions and try again.');
     }
   }, []); // no external deps needed — everything is accessed via refs or stable socket
@@ -269,9 +270,9 @@ export default function HostRoom() {
   // When stream changes, send offers to any listeners already in the room.
   useEffect(() => {
     if (stream && listeners.length > 0) {
-      console.log(`[HostRoom] stream available, creating offers for ${listeners.length} listeners`);
+      debugLog(`[HostRoom] stream available, creating offers for ${listeners.length} listeners`);
       listeners.forEach((l) => {
-        console.log(`[HostRoom] creating offer for listener ${l.id}`);
+        debugLog(`[HostRoom] creating offer for listener ${l.id}`);
         createOffer(l.id);
       });
     }
