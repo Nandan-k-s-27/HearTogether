@@ -72,17 +72,27 @@ export function AuthProvider({ children }) {
       const returnTo = localStorage.getItem('post_auth_redirect');
       if (returnTo) {
         localStorage.removeItem('post_auth_redirect');
-        window.location.assign(returnTo);
+        window.location.replace(returnTo);
         return;
       }
 
       // Clean URL
       window.history.replaceState({}, document.title, window.location.pathname);
+      setAuthBootState({
+        active: false,
+        attempt: 0,
+        message: '',
+      });
     }
 
     if (authError) {
       setError('Authentication failed. Please try again.');
       window.history.replaceState({}, document.title, window.location.pathname);
+      setAuthBootState({
+        active: false,
+        attempt: 0,
+        message: '',
+      });
     }
   }, []);
 
@@ -161,7 +171,8 @@ export function AuthProvider({ children }) {
     await sleep(450);
 
     const qp = prompt ? `?prompt=${encodeURIComponent(prompt)}` : '';
-    window.location.assign(`${BACKEND_URL}/auth/google${qp}`);
+    // replace prevents stale auth-entry pages from staying in browser history.
+    window.location.replace(`${BACKEND_URL}/auth/google${qp}`);
   };
 
   const switchAccount = async () => {

@@ -1,9 +1,18 @@
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 
 export default function LoginPage() {
-  const { login, authBootState } = useAuth();
+  const navigate = useNavigate();
+  const { user, loading, login, authBootState } = useAuth();
+
+  useEffect(() => {
+    if (!loading && user) {
+      navigate('/', { replace: true });
+    }
+  }, [loading, user, navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
