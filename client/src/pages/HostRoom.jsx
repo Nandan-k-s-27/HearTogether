@@ -7,6 +7,8 @@ import { getIceServers, pingServer } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 import { UserProfile } from '../components/UserProfile';
+import { useToast, ToastContainer } from '../components/ui/toast';
+import { SkeletonBox } from '../components/ui/skeleton';
 import { debugLog, errorLog } from '../lib/logger';
 
 const CAPTURE_OPTIONS = [
@@ -17,6 +19,7 @@ const CAPTURE_OPTIONS = [
 export default function HostRoom() {
   const { roomId } = useParams();
   const navigate = useNavigate();
+  const toast = useToast();
 
   const [roomCode, setRoomCode] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -25,6 +28,7 @@ export default function HostRoom() {
   const [stream, setStream] = useState(null);
   const [iceServersConfig, setIceServersConfig] = useState(null);
   const [captureError, setCaptureError] = useState(null);
+  const [listenerConnStates, setListenerConnStates] = useState({}); // listenerId -> connState
 
   // Fetch TURN-capable ICE servers from backend as early as possible so they
   // are ready before the first listener joins and createOffer() is called.
@@ -38,8 +42,11 @@ export default function HostRoom() {
         debugLog(`[HostRoom] STUN=${stunCount}, TURN=${turnCount}`);
         setIceServersConfig({ iceServers: data.iceServers });
       }
-    }).catch(err => errorLog(`[HostRoom] failed to fetch ICE servers:`, err));
-  }, []);
+    }).catch(err => {
+      errorLog(`[HostRoom] failed to fetch ICE servers:`, err);
+      toast.warning('Could not load relay servers. Peer connections may be slower.');
+    });
+  }, [toast]);
 
   const { createOffer, handleAnswer, handleIceCandidate, removePeer, closeAll } = useHostWebRTC(socket, stream, iceServersConfig);
   const syncInterval = useRef(null);
@@ -110,6 +117,7 @@ export default function HostRoom() {
           joinedAt: Date.now(),
         }];
       });
+      setListenerConnStates((prev) => ({ ...prev, [listenerId]: 'connecting' }));
       if (stream) {
         debugLog(`[HostRoom] stream exists, creating offer for ${listenerId}`);
         createOffer(listenerId);
@@ -121,11 +129,17 @@ export default function HostRoom() {
     const onListenerLeft = ({ listenerId }) => {
       debugLog(`[HostRoom] listener left: ${listenerId}`);
       setListeners((prev) => prev.filter((l) => l.id !== listenerId));
+      setListenerConnStates((prev) => {
+        const next = { ...prev };
+        delete next[listenerId];
+        return next;
+      });
       removePeer(listenerId);
     };
 
     const onAnswer = ({ from, answer }) => {
       debugLog(`[HostRoom] received answer from ${from}`);
+      setListenerConnStates((prev) => ({ ...prev, [from]: 'connected' }));
       handleAnswer(from, answer);
     };
     const onIce = ({ from, candidate }) => {
@@ -228,7 +242,9 @@ export default function HostRoom() {
         mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       } else if (type === 'display') {
         if (!navigator.mediaDevices?.getDisplayMedia) {
-          setCaptureError('Display capture is not supported on this device. Open HearTogether on a desktop browser, or use Microphone mode instead.');
+          const err = 'Display capture is not supported on this device. Open HearTogether on a desktop browser, or use Microphone mode instead.';
+          setCaptureError(err);
+          toast.error(err);
           return;
         }
         // getDisplayMedia — video is required by the API.
@@ -255,7 +271,9 @@ export default function HostRoom() {
 
         if (mediaStream.getAudioTracks().length === 0) {
           mediaStream.getTracks().forEach((track) => track.stop());
-          setCaptureError('No system audio was selected. Start again and enable the Share audio checkbox in the browser picker.');
+          const err = 'No system audio was selected. Start again and enable the Share audio checkbox in the browser picker.';
+          setCaptureError(err);
+          toast.error(err);
           return;
         }
       }
@@ -274,6 +292,8 @@ export default function HostRoom() {
       setStream(mediaStream);
       setStreaming(true);
       setPaused(false);
+      setCaptureError(null);
+      toast.success('Audio capture started');
 
       if (syncInterval.current) clearInterval(syncInterval.current);
       syncInterval.current = setInterval(() => {
@@ -281,9 +301,15 @@ export default function HostRoom() {
       }, 5000);
     } catch (err) {
       errorLog('Capture failed:', err);
-      setCaptureError('Could not capture audio. Please make sure you grant the required permissions and try again.');
+      const errorMsg = err?.name === 'NotAllowedError'
+        ? 'Permission denied. Please allow audio access to use HearTogether.'
+        : err?.name === 'NotFoundError'
+        ? 'No compatible audio device found.'
+        : 'Could not capture audio. Please make sure you grant the required permissions and try again.';
+      setCaptureError(errorMsg);
+      toast.error(errorMsg);
     }
-  }, []); // no external deps needed — everything is accessed via refs or stable socket
+  }, [toast]); // no other external deps needed — everything else is accessed via refs or stable socket
 
   // When stream changes, send offers to any listeners already in the room.
   useEffect(() => {
@@ -318,6 +344,7 @@ export default function HostRoom() {
 
   return (
     <div className="min-h-screen px-4 py-8 md:px-12">
+      <ToastContainer toasts={toast.toasts} onRemove={toast.removeToast} />
       {/* Header */}
       <header className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold">HearTogether</h1>
@@ -371,9 +398,18 @@ export default function HostRoom() {
           <GlowCard customSize glowColor="purple" className="w-full">
             <h2 className="mb-4 text-lg font-semibold">Broadcast</h2>
 
-            {captureError && (
-              <div className="mb-3 rounded-lg border border-yellow-500/30 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-300">
-                {captureError}
+          {captureError && (
+              <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-red-300">⚠️ Capture Error</p>
+                  <p className="text-xs text-red-200 mt-2">{captureError}</p>
+                </div>
+                <button
+                  onClick={() => setCaptureError(null)}
+                  className="w-full rounded-lg bg-red-600/40 hover:bg-red-600/60 px-3 py-2 text-xs font-semibold text-red-100 transition"
+                >
+                  Dismiss
+                </button>
               </div>
             )}
 
@@ -426,28 +462,54 @@ export default function HostRoom() {
               <p className="text-sm text-gray-500">No listeners yet. Share the QR code to invite people.</p>
             ) : (
               <ul className="flex flex-col gap-2">
-                {listeners.map((l) => (
-                  <li key={l.id} className="flex items-center justify-between rounded-lg bg-white/5 px-4 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-green-500" />
-                      <div className="text-left">
-                        <div className="text-sm font-semibold">{l.name || l.email || `${l.id.slice(0, 8)}…`}</div>
-                        {l.email && <div className="text-xs text-gray-400">{l.email}</div>}
+                {listeners.map((l) => {
+                  const connState = listenerConnStates[l.id] || 'new';
+                  const connStateColor = connState === 'connected' 
+                    ? 'text-green-400' 
+                    : connState === 'failed'
+                    ? 'text-red-400'
+                    : connState === 'disconnected'
+                    ? 'text-yellow-400'
+                    : 'text-gray-400';
+                  const connStateLabel = connState === 'connected'
+                    ? 'Connected'
+                    : connState === 'connecting'
+                    ? 'Connecting…'
+                    : connState === 'failed'
+                    ? 'Failed'
+                    : connState === 'disconnected'
+                    ? 'Interrupted'
+                    : 'Pending';
+                  
+                  return (
+                    <li key={l.id} className="flex items-center justify-between rounded-lg bg-white/5 px-4 py-3">
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className={`h-2 w-2 rounded-full ${
+                          connState === 'connected' ? 'bg-green-400' :
+                          connState === 'failed' ? 'bg-red-400' :
+                          connState === 'disconnected' ? 'bg-yellow-400' :
+                          'bg-gray-400 animate-pulse'
+                        }`} />
+                        <div className="text-left min-w-0 flex-1">
+                          <div className="text-sm font-semibold truncate">{l.name || l.email || `${l.id.slice(0, 8)}…`}</div>
+                          <div className={`text-xs ${connStateColor} mt-0.5`}>{connStateLabel}</div>
+                          {l.email && <div className="text-xs text-gray-400">{l.email}</div>}
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="min-w-8 text-center text-xl leading-none" title={l.reaction ? 'Latest reaction' : 'No reaction yet'}>
-                        {l.reaction || '·'}
-                      </span>
-                      <button
-                        onClick={() => handleRemoveListener(l.id)}
-                        className="text-xs text-red-400 hover:text-red-300 transition"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </li>
-                ))}
+                      <div className="flex items-center gap-3 flex-shrink-0 ml-2">
+                        <span className="text-lg leading-none" title={l.reaction ? 'Latest reaction' : 'No reaction yet'}>
+                          {l.reaction || '·'}
+                        </span>
+                        <button
+                          onClick={() => handleRemoveListener(l.id)}
+                          className="text-xs text-red-400 hover:text-red-300 transition"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </GlowCard>

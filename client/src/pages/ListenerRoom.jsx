@@ -5,6 +5,8 @@ import { useListenerWebRTC } from '../hooks/useWebRTC';
 import { getIceServers, pingServer } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
+import { useToast, ToastContainer } from '../components/ui/toast';
+import { SkeletonBox, SkeletonButton } from '../components/ui/skeleton';
 import { debugLog, warnLog, errorLog } from '../lib/logger';
 
 const QUICK_REACTIONS = ['❤️', '👍', '👎', '😭', '😍'];
@@ -13,6 +15,7 @@ const EXTRA_REACTIONS = ['👏', '🔥', '🎉', '😮', '🙏', '😂', '🤯',
 export default function ListenerRoom() {
   const { code: roomCode } = useParams();
   const navigate = useNavigate();
+  const toast = useToast();
 
   const [status, setStatus] = useState('connecting'); // connecting | listening | paused | ended
   const [volume, setVolume] = useState(1);
@@ -33,6 +36,11 @@ export default function ListenerRoom() {
   // is never used, causing silent audio failure on cellular networks.
   const [iceReady, setIceReady] = useState(false);
 
+  // Error & retry states
+  const [iceLoadError, setIceLoadError] = useState(null);
+  const [connError, setConnError] = useState(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+
   // Fetch TURN-capable ICE servers FIRST, then join the room.
   useEffect(() => {
     debugLog(`[ListenerRoom] fetching ICE servers`);
@@ -44,11 +52,18 @@ export default function ListenerRoom() {
           const stunCount = data.iceServers.filter(s => s.urls.toLowerCase().includes('stun')).length;
           debugLog(`[ListenerRoom] STUN=${stunCount}, TURN=${turnCount}`);
           setIceServersConfig({ iceServers: data.iceServers });
+          setIceLoadError(null);
         } else {
           warnLog(`[ListenerRoom] no iceServers in response`);
+          // Still allow connection with default STUN servers
+          setIceLoadError(null);
         }
       })
-      .catch((err) => errorLog(`[ListenerRoom] failed to fetch ICE servers:`, err))
+      .catch((err) => {
+        errorLog(`[ListenerRoom] failed to fetch ICE servers:`, err);
+        setIceLoadError('Could not load ICE servers. Using fallback configuration.');
+        toast.warning('Connection may be slower without relay servers');
+      })
       .finally(() => {
         debugLog(`[ListenerRoom] setting iceReady=true`);
         setIceReady(true);
@@ -228,6 +243,19 @@ export default function ListenerRoom() {
     };
   }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer]);
 
+  // Monitor connection state for errors
+  useEffect(() => {
+    if (connState === 'failed') {
+      setConnError('WebRTC connection failed. ICE negotiation could not establish a path.');
+      toast.error('Connection failed — try leaving and rejoining the room');
+    } else if (connState === 'disconnected') {
+      setConnError('Connection interrupted. Attempting to recover…');
+      toast.warning('Connection lost, trying to reconnect');
+    } else if (connState === 'connected') {
+      setConnError(null);
+    }
+  }, [connState, toast]);
+
   const handleLeave = () => {
     clearOfferRetryTimer();
     close();
@@ -259,10 +287,22 @@ export default function ListenerRoom() {
     ended: { color: 'text-red-400', label: 'Session Ended' },
   };
 
+  const handleRetry = useCallback(() => {
+    setIsRetrying(true);
+    setConnError(null);
+    close(); // Close existing connection
+    
+    // Reload page after a short delay to reset everything cleanly
+    setTimeout(() => {
+      window.location.reload();
+    }, 500);
+  }, [close]);
+
   const s = statusConfig[status];
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-6">
+      <ToastContainer toasts={toast.toasts} onRemove={toast.removeToast} />
       <GlowCard customSize glowColor="blue" className="w-full max-w-md text-center">
         <h1 className="mb-6 text-2xl font-bold">HearTogether</h1>
 
@@ -276,11 +316,44 @@ export default function ListenerRoom() {
           </div>
         )}
         {status === 'connecting' && (
-          <p className="mb-6 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
+          <div className="mb-6">
+            {!iceReady ? (
+              <div className="space-y-2">
+                <SkeletonBox height="h-6" width="w-32" />
+                <p className="text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
+            )}
+          </div>
+        )}
+
+        {/* ICE/TURN loading state */}
+        {!iceReady && (
+          <div className="mb-4 space-y-2">
+            <p className="text-xs uppercase tracking-wider text-gray-400 mb-2">Initializing…</p>
+            <SkeletonBox height="h-10" />
+          </div>
+        )}
+
+        {/* Connection error state */}
+        {connError && !isRetrying && (
+          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-red-300">⚠️ Connection Issue</p>
+              <p className="text-xs text-red-200 mt-1">{connError}</p>
+            </div>
+            <button
+              onClick={handleRetry}
+              className="w-full rounded-lg bg-red-600/40 hover:bg-red-600/60 px-3 py-2 text-xs font-semibold text-red-100 transition"
+            >
+              Retry Connection
+            </button>
+          </div>
         )}
 
         {/* WebRTC connection state — shown while audio is not yet playing */}
-        {!audioPlaying && status !== 'ended' && (
+        {!audioPlaying && status !== 'ended' && iceReady && (
           <div className={`mb-4 flex items-center justify-center gap-2 text-xs rounded-lg px-3 py-2 ${
             connState === 'connected'
               ? 'bg-green-900/40 text-green-300'
@@ -323,6 +396,13 @@ export default function ListenerRoom() {
           >
             Tap to Hear
           </ShimmerButton>
+        )}
+
+        {/* Loading state while waiting for audio to be ready */}
+        {!audioReady && !audioPlaying && iceReady && status === 'listening' && (
+          <div className="mb-6">
+            <SkeletonButton />
+          </div>
         )}
 
         {/* Volume — only shown once playback has actually started */}
