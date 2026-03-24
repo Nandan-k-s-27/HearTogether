@@ -1,8 +1,37 @@
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { ShimmerButton } from './ui/shimmer-button';
 
 export function UserProfile() {
   const { user, login, logout, switchAccount, authBootState } = useAuth();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (event) => {
+      if (!menuRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
 
   if (!user) {
     return (
@@ -18,37 +47,64 @@ export function UserProfile() {
     );
   }
 
+  const initials = user.name?.trim()?.charAt(0)?.toUpperCase() || 'U';
+
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 max-w-full">
-      {user.picture && (
-        <img
-          src={user.picture}
-          alt={user.name}
-          className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-brand-400"
-        />
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="h-9 w-9 overflow-hidden rounded-full border border-brand-400/80 bg-brand-700/30 transition hover:border-brand-300 focus:outline-none focus:ring-2 focus:ring-brand-400/70"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Open account menu"
+      >
+        {user.picture ? (
+          <img
+            src={user.picture}
+            alt={user.name || 'Profile'}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <span className="inline-flex h-full w-full items-center justify-center text-sm font-semibold text-white">
+            {initials}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 z-30 mt-2 w-64 rounded-2xl border border-white/10 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-sm">
+          <div className="mb-3 border-b border-white/10 pb-3 text-left">
+            <p className="truncate text-sm font-semibold text-white">{user.name}</p>
+            <p className="truncate text-xs text-gray-400">{user.email}</p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <ShimmerButton
+              onClick={() => {
+                setOpen(false);
+                switchAccount();
+              }}
+              background="rgba(20, 20, 30, 0.95)"
+              shimmerColor="#5c7cfa"
+              className="dark:text-white flex-1 text-[11px] sm:text-xs font-semibold px-2.5 py-1 whitespace-nowrap"
+            >
+              Switch
+            </ShimmerButton>
+            <ShimmerButton
+              onClick={() => {
+                setOpen(false);
+                logout();
+              }}
+              background="rgba(220, 38, 38, 1)"
+              shimmerColor="#ffffff"
+              className="dark:text-white flex-1 text-[11px] sm:text-xs font-semibold px-2.5 py-1 whitespace-nowrap"
+            >
+              Logout
+            </ShimmerButton>
+          </div>
+        </div>
       )}
-      <div className="hidden sm:block min-w-0 text-sm text-right">
-        <p className="font-medium text-white max-w-[10rem] truncate">{user.name}</p>
-        <p className="text-xs text-gray-400 max-w-[12rem] truncate">{user.email}</p>
-      </div>
-      <div className="flex items-center gap-1.5 sm:gap-2">
-        <ShimmerButton
-          onClick={switchAccount}
-          background="rgba(20, 20, 30, 0.95)"
-          shimmerColor="#5c7cfa"
-          className="dark:text-white text-[11px] sm:text-xs font-semibold px-2.5 py-1 whitespace-nowrap"
-        >
-          Switch
-        </ShimmerButton>
-        <ShimmerButton
-          onClick={logout}
-          background="rgba(220, 38, 38, 1)"
-          shimmerColor="#ffffff"
-          className="dark:text-white text-[11px] sm:text-xs font-semibold px-2.5 py-1 whitespace-nowrap"
-        >
-          Logout
-        </ShimmerButton>
-      </div>
     </div>
   );
 }
