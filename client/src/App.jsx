@@ -7,9 +7,6 @@ import LoginPage from './pages/LoginPage';
 import HostRoom from './pages/HostRoom';
 import ListenerRoom from './pages/ListenerRoom';
 import JoinPage from './pages/JoinPage';
-import UserManualPage from './pages/UserManualPage';
-import HostManualPage from './pages/HostManualPage';
-import ListenerManualPage from './pages/ListenerManualPage';
 import AuthBootOverlay from './components/AuthBootOverlay';
 
 function ProtectedRoute({ children }) {
@@ -44,9 +41,6 @@ function AppRoutes() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<LandingPage />} />
-        <Route path="/manual" element={<UserManualPage />} />
-        <Route path="/manual/host" element={<HostManualPage />} />
-        <Route path="/manual/listener" element={<ListenerManualPage />} />
         <Route
           path="/host/:roomId"
           element={
