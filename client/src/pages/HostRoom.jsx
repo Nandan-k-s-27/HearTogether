@@ -439,7 +439,11 @@ export default function HostRoom() {
 
       if (syncInterval.current) clearInterval(syncInterval.current);
       syncInterval.current = setInterval(() => {
-        socket.emit('sync:timestamp', { timestamp: Date.now() });
+        socket.emit('sync:timestamp', {
+          timestamp: Date.now(),
+          sessionStartedAt: sessionStartedAtRef.current,
+          sessionLimitMs,
+        });
       }, 5000);
     } catch (err) {
       errorLog('Capture failed:', err);

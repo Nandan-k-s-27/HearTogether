@@ -14,6 +14,13 @@ import { debugLog, warnLog, errorLog } from '../lib/logger';
 const QUICK_REACTIONS = ['❤️', '👍', '👎', '😭', '😍'];
 const EXTRA_REACTIONS = ['👏', '🔥', '🎉', '😮', '🙏', '😂', '🤯', '💯'];
 
+function formatDuration(seconds) {
+  const safe = Math.max(0, Number(seconds) || 0);
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
 export default function ListenerRoom() {
   const { code: roomCode } = useParams();
   const navigate = useNavigate();
@@ -40,6 +47,8 @@ export default function ListenerRoom() {
   const [showExtraReactions, setShowExtraReactions] = useState(false);
   const [chatMessage, setChatMessage] = useState('');
   const [showChat, setShowChat] = useState(false);
+  const [sessionLimitMs, setSessionLimitMs] = useState(60 * 60 * 1000);
+  const [sessionRemainingSec, setSessionRemainingSec] = useState(null);
   // iceReady gates the socket join — we must not emit listener:join until the
   // ICE servers fetch has settled.  If the offer arrives before iceRef is
   // updated the RTCPeerConnection is created with STUN-only and TURN relay
@@ -53,6 +62,7 @@ export default function ListenerRoom() {
   const [roomCapacity, setRoomCapacity] = useState(null);
   const prevConnStateRef = useRef('new');
   const disconnectRecoveryTimerRef = useRef(null);
+  const sessionExpiryMsRef = useRef(null);
 
   // Fetch TURN-capable ICE servers FIRST, then join the room.
   useEffect(() => {
@@ -192,6 +202,9 @@ export default function ListenerRoom() {
         if (typeof res.listenerCount === 'number' && typeof res.maxListeners === 'number') {
           setRoomCapacity({ listenerCount: res.listenerCount, maxListeners: res.maxListeners });
         }
+        if (typeof res.sessionLimitMs === 'number' && res.sessionLimitMs > 0) {
+          setSessionLimitMs(res.sessionLimitMs);
+        }
 
         // Recovery path: if first offer gets missed due to timing, ask host
         // to resend it a few times while still waiting for a remote track.
@@ -232,6 +245,17 @@ export default function ListenerRoom() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    const updateCountdown = () => {
+      if (!sessionExpiryMsRef.current) return;
+      const remainingSec = Math.max(0, Math.ceil((sessionExpiryMsRef.current - Date.now()) / 1000));
+      setSessionRemainingSec(remainingSec);
+    };
+
+    const id = setInterval(updateCountdown, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   // Signaling events
   useEffect(() => {
     const onOffer = ({ from, offer }) => {
@@ -269,12 +293,24 @@ export default function ListenerRoom() {
       close();
     };
 
+    const onSyncTimestamp = ({ sessionStartedAt, sessionLimitMs: syncedLimitMs }) => {
+      if (!sessionStartedAt || !Number.isFinite(sessionStartedAt)) return;
+      const effectiveLimit = Number.isFinite(syncedLimitMs) && syncedLimitMs > 0 ? syncedLimitMs : sessionLimitMs;
+      const expiry = Number(sessionStartedAt) + Number(effectiveLimit);
+      if (!Number.isFinite(expiry)) return;
+
+      sessionExpiryMsRef.current = expiry;
+      setSessionLimitMs(Number(effectiveLimit));
+      setSessionRemainingSec(Math.max(0, Math.ceil((expiry - Date.now()) / 1000)));
+    };
+
     socket.on('signal:offer', onOffer);
     socket.on('signal:ice-candidate', onIce);
     socket.on('host:paused', onPaused);
     socket.on('host:resumed', onResumed);
     socket.on('host:stopped', onStopped);
     socket.on('host:removed', onRemoved);
+    socket.on('sync:timestamp', onSyncTimestamp);
 
     return () => {
       socket.off('signal:offer', onOffer);
@@ -283,8 +319,9 @@ export default function ListenerRoom() {
       socket.off('host:resumed', onResumed);
       socket.off('host:stopped', onStopped);
       socket.off('host:removed', onRemoved);
+      socket.off('sync:timestamp', onSyncTimestamp);
     };
-  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer, controller]);
+  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer, controller, sessionLimitMs]);
 
   // Monitor connection state for errors
   useEffect(() => {
@@ -394,6 +431,23 @@ export default function ListenerRoom() {
             {roomCapacity && (
               <p className="mt-1 text-xs text-gray-400">Listeners: {roomCapacity.listenerCount}/{roomCapacity.maxListeners}</p>
             )}
+            <div className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wider text-gray-500">Session Remaining</p>
+              <p className={`font-mono text-base font-semibold ${
+                sessionRemainingSec === null
+                  ? 'text-gray-300'
+                  : sessionRemainingSec <= 60
+                  ? 'text-red-300'
+                  : sessionRemainingSec <= 5 * 60
+                  ? 'text-yellow-300'
+                  : 'text-blue-300'
+              }`}>
+                {sessionRemainingSec === null ? 'Waiting for host timer…' : formatDuration(sessionRemainingSec)}
+              </p>
+              <p className="text-[10px] text-gray-500">
+                Session limit: {Math.floor(sessionLimitMs / 60000)} min
+              </p>
+            </div>
           </div>
         )}
         {status === 'connecting' && (

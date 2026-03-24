@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const { createAdapter } = require('@socket.io/redis-adapter');
 const cors = require('cors');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
@@ -24,7 +25,13 @@ const {
   getMessages,
 } = require('./rooms');
 const { createToken, verifyToken, authMiddleware, getOrCreateUser } = require('./auth');
-const { initRedis, closeRedis, isRedisReady } = require('./redis/client');
+const {
+  initRedis,
+  closeRedis,
+  isRedisReady,
+  getRedisPublisher,
+  getRedisSubscriber,
+} = require('./redis/client');
 const { createSessionMiddleware } = require('./redis/session');
 const { createRedisRateLimiter } = require('./redis/rateLimit');
 const { buildCacheKey, getOrSetJSON, deleteKey } = require('./redis/cache');
@@ -464,6 +471,7 @@ io.on('connection', (socket) => {
       roomId: room.id,
       listenerCount: room.listeners.size,
       maxListeners,
+      sessionLimitMs: MAX_TTL_MS,
     });
 
     // Notify host about new listener
@@ -647,11 +655,16 @@ io.on('connection', (socket) => {
   });
 
   // Sync: host broadcasts its timestamp periodically
-  socket.on('sync:timestamp', ({ timestamp }) => {
+  socket.on('sync:timestamp', ({ timestamp, sessionStartedAt, sessionLimitMs }) => {
     const { roomId } = socket.data;
     if (roomId) {
       touchRoom(roomId);
-      socket.to(roomId).emit('sync:timestamp', { timestamp, serverTime: Date.now() });
+      socket.to(roomId).emit('sync:timestamp', {
+        timestamp,
+        sessionStartedAt,
+        sessionLimitMs,
+        serverTime: Date.now(),
+      });
     }
   });
 
@@ -690,6 +703,13 @@ async function bootstrap() {
     await redisInitPromise;
 
     if (isRedisReady()) {
+      const pub = getRedisPublisher();
+      const sub = getRedisSubscriber();
+      if (pub && sub) {
+        io.adapter(createAdapter(pub, sub));
+        console.log('[socket] Redis adapter enabled');
+      }
+
       await subscribeEvent('room-events', async (event) => {
         if (!event?.type) return;
         if (event.roomId) {
