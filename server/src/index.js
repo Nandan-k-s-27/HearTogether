@@ -4,7 +4,6 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
@@ -25,6 +24,22 @@ const {
   getMessages,
 } = require('./rooms');
 const { createToken, verifyToken, authMiddleware, getOrCreateUser } = require('./auth');
+const { initRedis, closeRedis, isRedisReady } = require('./redis/client');
+const { createSessionMiddleware } = require('./redis/session');
+const { createRedisRateLimiter } = require('./redis/rateLimit');
+const { buildCacheKey, getOrSetJSON, deleteKey } = require('./redis/cache');
+const { publishEvent, subscribeEvent } = require('./redis/pubsub');
+const {
+  addActiveUser,
+  removeActiveUser,
+  getActiveUserCount,
+  enqueueSignal,
+  getRecentSignals,
+} = require('./redis/realtime');
+
+const redisInitPromise = initRedis().catch((err) => {
+  console.warn('[redis] startup initialization failed, continuing without Redis', err?.message || err);
+});
 
 const app = express();
 const server = http.createServer(app);
@@ -52,6 +67,7 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10kb' }));
 app.use(cookieParser());
+app.use(createSessionMiddleware());
 
 // Initialize Passport authentication middleware
 app.use(passport.initialize());
@@ -81,21 +97,29 @@ function getFrontendRedirectUrl() {
   return raw.split(',').map((s) => s.trim()).filter(Boolean)[0] || 'http://localhost:5173';
 }
 
-const createRoomLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000, // 10 minutes
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many rooms created. Please try again later.' },
+const createRoomLimiter = createRedisRateLimiter({
+  keyPrefix: 'rate:create-room',
+  windowSeconds: 10 * 60,
+  maxRequests: 30,
+  message: 'Too many rooms created. Please try again later.',
 });
 
-const roomLookupLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 120,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many room lookups. Please try again later.' },
+const roomLookupLimiter = createRedisRateLimiter({
+  keyPrefix: 'rate:room-lookup',
+  windowSeconds: 5 * 60,
+  maxRequests: 120,
+  message: 'Too many room lookups. Please try again later.',
 });
+
+function roomLookupCacheKey(code) {
+  return buildCacheKey('cache', 'room-lookup', code);
+}
+
+async function invalidateRoomLookupCache(code) {
+  const normalized = String(code || '').toUpperCase();
+  if (!normalized) return;
+  await deleteKey(roomLookupCacheKey(normalized));
+}
 
 // Room lifecycle configuration
 const SIX_HOURS = 6 * 60 * 60 * 1000;
@@ -136,6 +160,44 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.get('/api/system/redis', (_req, res) => {
+  res.json({
+    enabled: String(process.env.REDIS_ENABLED || 'true').toLowerCase() !== 'false',
+    connected: isRedisReady(),
+    url: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
+  });
+});
+
+app.post('/api/events/publish', authMiddleware, async (req, res) => {
+  const channel = String(req.body?.channel || 'room-events').trim();
+  const payload = req.body?.payload;
+  if (!channel || !payload || typeof payload !== 'object') {
+    return res.status(400).json({ error: 'channel and payload(object) are required' });
+  }
+
+  await publishEvent(channel, {
+    ...payload,
+    publishedBy: req.user?.id || req.user?.email || 'unknown',
+  });
+
+  res.json({ ok: true, channel });
+});
+
+app.get('/api/rooms/:roomId/realtime', authMiddleware, async (req, res) => {
+  const roomId = String(req.params.roomId || '').trim();
+  if (!roomId) return res.status(400).json({ error: 'roomId is required' });
+
+  const activeUsers = await getActiveUserCount(roomId);
+  const recentSignals = await getRecentSignals(roomId, 30);
+
+  res.json({
+    roomId,
+    redisConnected: isRedisReady(),
+    activeUsers,
+    recentSignals,
+  });
+});
+
 // AUTH ROUTES
 
 // Start Google OAuth flow
@@ -152,9 +214,15 @@ app.get('/auth/google', (req, res, next) => {
 app.get(
   '/auth/google/callback',
   passport.authenticate('google', { failureRedirect: '/auth/failed', session: false }),
-  (req, res) => {
+  async (req, res) => {
     // User authenticated successfully
     if (req.user) {
+      req.session.user = {
+        id: req.user.id,
+        email: req.user.email,
+        name: req.user.name,
+      };
+      req.session.lastSeenAt = Date.now();
       const token = createToken(req.user);
       // Redirect to frontend with token in query (frontend will store in cookie)
       const frontendUrl = getFrontendRedirectUrl();
@@ -178,7 +246,12 @@ app.get('/auth/me', authMiddleware, (req, res) => {
 // Check if user is authenticated
 app.get('/auth/status', (req, res) => {
   const token = req.cookies?.auth_token || req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.json({ authenticated: false });
+  if (!token && !req.session?.user) return res.json({ authenticated: false });
+
+  if (req.session?.user) {
+    req.session.lastSeenAt = Date.now();
+    return res.json({ authenticated: true, user: req.session.user, source: 'session' });
+  }
 
   const user = verifyToken(token);
   if (user) {
@@ -191,12 +264,15 @@ app.get('/auth/status', (req, res) => {
 // Logout
 app.post('/auth/logout', (req, res) => {
   res.clearCookie('auth_token');
-  res.json({ ok: true });
+  req.session?.destroy?.(() => {
+    res.json({ ok: true });
+  });
 });
 
 // REST: create room (requires authentication)
 app.post('/api/rooms', authMiddleware, createRoomLimiter, (_req, res) => {
   const room = createRoom();
+  invalidateRoomLookupCache(room.code).catch(() => {});
   res.status(201).json(room);
 });
 
@@ -260,17 +336,31 @@ app.get('/api/ice-servers', (_req, res) => {
 // REST: get room info
 app.get('/api/rooms/:code', roomLookupLimiter, (req, res) => {
   const code = req.params.code.replace(/[^A-Za-z0-9]/g, '').slice(0, 20).toUpperCase();
-  const room = getRoomByCode(code);
-  if (!room) return res.status(404).json({ error: 'Room not found' });
+  const cacheKey = roomLookupCacheKey(code);
   const maxListeners = getMaxListeners();
-  res.json({
-    id: room.id,
-    code: room.code,
-    hostConnected: room.hostConnected,
-    listenerCount: room.listeners.size,
-    maxListeners,
-    isFull: room.listeners.size >= maxListeners,
-  });
+
+  getOrSetJSON(cacheKey, 15, async () => {
+    const room = getRoomByCode(code);
+    if (!room) return null;
+    return {
+      id: room.id,
+      code: room.code,
+      hostConnected: room.hostConnected,
+      listenerCount: room.listeners.size,
+      maxListeners,
+      isFull: room.listeners.size >= maxListeners,
+      fetchedAt: Date.now(),
+    };
+  })
+    .then(({ data, cacheHit }) => {
+      if (!data) return res.status(404).json({ error: 'Room not found' });
+      res.setHeader('X-Cache', cacheHit ? 'HIT' : 'MISS');
+      res.json(data);
+    })
+    .catch((err) => {
+      console.error('[cache-aside] room lookup failed', err?.message || err);
+      res.status(500).json({ error: 'Room lookup failed' });
+    });
 });
 
 // Socket.IO signaling - with authentication middleware
@@ -338,6 +428,8 @@ io.on('connection', (socket) => {
     socket.join(roomId);
     socket.data.role = 'host';
     socket.data.roomId = roomId;
+    addActiveUser(room.id, socket.id).catch(() => {});
+    invalidateRoomLookupCache(room.code).catch(() => {});
     cb?.({
       ok: true,
       code: room.code,
@@ -363,6 +455,8 @@ io.on('connection', (socket) => {
     socket.join(room.id);
     socket.data.role = 'listener';
     socket.data.roomId = room.id;
+    addActiveUser(room.id, socket.id).catch(() => {});
+    invalidateRoomLookupCache(room.code).catch(() => {});
 
     cb?.({
       ok: true,
@@ -397,6 +491,7 @@ io.on('connection', (socket) => {
       return;
     }
     io.to(to).emit('signal:offer', { from: socket.id, offer });
+    if (roomId) enqueueSignal(roomId, { type: 'offer', from: socket.id, to }).catch(() => {});
     console.log(`[signal] offer delivered to ${to}`);
   });
 
@@ -409,6 +504,7 @@ io.on('connection', (socket) => {
       return;
     }
     io.to(to).emit('signal:answer', { from: socket.id, answer });
+    if (roomId) enqueueSignal(roomId, { type: 'answer', from: socket.id, to }).catch(() => {});
     console.log(`[signal] answer delivered to ${to}`);
   });
 
@@ -422,6 +518,7 @@ io.on('connection', (socket) => {
     const type = candidate.type || '?';
     console.log(`[signal] ice-candidate (${type}) from ${socket.id} → ${to}`);
     io.to(to).emit('signal:ice-candidate', { from: socket.id, candidate });
+    if (roomId) enqueueSignal(roomId, { type: 'ice-candidate', from: socket.id, to, candidateType: type }).catch(() => {});
   });
 
   // Listener can request host to resend an SDP offer if initial signaling
@@ -458,6 +555,13 @@ io.on('connection', (socket) => {
         : (socket.user?.name || null),
       listenerCount: room.listeners.size,
     });
+
+    publishEvent('room-events', {
+      type: 'listener:reaction',
+      roomId,
+      listenerId: socket.id,
+      reaction: normalizedReaction,
+    }).catch(() => {});
   });
 
   // Listener sends a text message (chat)
@@ -491,6 +595,13 @@ io.on('connection', (socket) => {
     });
 
     console.log(`[message] from ${socket.id}: "${normalizedText}"`);
+
+    publishEvent('room-events', {
+      type: 'listener:message',
+      roomId,
+      listenerId: socket.id,
+      text: normalizedText,
+    }).catch(() => {});
   });
 
   // Host requests message history when joining
@@ -516,6 +627,8 @@ io.on('connection', (socket) => {
     const room = getAuthorizedHostRoom();
     if (!room) return;
     socket.to(room.id).emit('host:stopped');
+    publishEvent('room-events', { type: 'host:stop', roomId: room.id, hostId: socket.id }).catch(() => {});
+    invalidateRoomLookupCache(room.code).catch(() => {});
     deleteRoom(room.id);
   });
 
@@ -525,6 +638,8 @@ io.on('connection', (socket) => {
     if (!room.listeners.has(listenerId)) return;
 
     removeListener(room.id, listenerId);
+    removeActiveUser(room.id, listenerId).catch(() => {});
+    invalidateRoomLookupCache(room.code).catch(() => {});
     io.to(listenerId).emit('host:removed');
     const listenerSocket = io.sockets.sockets.get(listenerId);
     if (listenerSocket) listenerSocket.leave(room.id);
@@ -548,10 +663,14 @@ io.on('connection', (socket) => {
 
     if (role === 'host') {
       io.to(roomId).emit('host:stopped');
+      removeActiveUser(room.id, socket.id).catch(() => {});
+      invalidateRoomLookupCache(room.code).catch(() => {});
       deleteRoom(roomId);
       console.log(`[room ${room.code}] host disconnected - room closed`);
     } else if (role === 'listener') {
       removeListener(room.id, socket.id);
+      removeActiveUser(room.id, socket.id).catch(() => {});
+      invalidateRoomLookupCache(room.code).catch(() => {});
       if (room.hostSocketId) {
         io.to(room.hostSocketId).emit('listener:left', {
           listenerId: socket.id,
@@ -564,9 +683,44 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`HearTogether server listening on port ${PORT}`);
-  if (hasTurn) console.log(`[TURN] provider: ${TURN_PROVIDER} OK`);
-  else console.log('[TURN] WARNING: no relay configured - mobile audio will fail');
-  console.log(`[lifecycle] max ${MAX_LISTENERS_PER_ROOM} listeners/room, ${MAX_TTL_MS / 1000 / 60} min inactivity TTL`);
+
+async function bootstrap() {
+  try {
+    await redisInitPromise;
+
+    if (isRedisReady()) {
+      await subscribeEvent('room-events', async (event) => {
+        if (!event?.type) return;
+        if (event.roomId) {
+          const activeCount = await getActiveUserCount(event.roomId);
+          if (activeCount !== null) {
+            console.log(`[pubsub] ${event.type} room=${event.roomId} activeUsers=${activeCount}`);
+          }
+        }
+      });
+    }
+
+    server.listen(PORT, () => {
+      console.log(`HearTogether server listening on port ${PORT}`);
+      if (hasTurn) console.log(`[TURN] provider: ${TURN_PROVIDER} OK`);
+      else console.log('[TURN] WARNING: no relay configured - mobile audio will fail');
+      console.log(`[lifecycle] max ${MAX_LISTENERS_PER_ROOM} listeners/room, ${MAX_TTL_MS / 1000 / 60} min inactivity TTL`);
+      console.log(`[redis] status: ${isRedisReady() ? 'connected' : 'disabled/unavailable'}`);
+    });
+  } catch (err) {
+    console.error('[bootstrap] failed to initialize backend', err?.message || err);
+    process.exit(1);
+  }
+}
+
+bootstrap();
+
+process.on('SIGINT', async () => {
+  await closeRedis();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  await closeRedis();
+  process.exit(0);
 });

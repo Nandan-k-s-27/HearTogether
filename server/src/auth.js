@@ -42,6 +42,12 @@ function verifyToken(token) {
  * Attaches user object to req.user if token is valid.
  */
 function authMiddleware(req, res, next) {
+  if (req.session?.user) {
+    req.session.lastSeenAt = Date.now();
+    req.user = req.session.user;
+    return next();
+  }
+
   const token = req.cookies?.auth_token || req.headers.authorization?.replace('Bearer ', '');
   if (!token) {
     return res.status(401).json({ error: 'Not authenticated' });

@@ -17,9 +17,54 @@ HearTogether is a real-time web audio sharing app. One user hosts audio, listene
 ## Tech Stack
 
 - Frontend: React 18, Vite 5, TailwindCSS 3, Socket.IO client, Axios
-- Backend: Node.js, Express, Socket.IO, Passport Google OAuth 2.0, JWT
+- Backend: Node.js, Express, Socket.IO, Passport Google OAuth 2.0, JWT, Redis
 - Transport: WebRTC audio + Socket.IO signaling
 - Deployment: Vercel (frontend) + Render (backend)
+
+## Redis Integration
+
+### What Redis is and why it is used
+
+- Redis is an in-memory key-value data store. Because reads/writes happen in memory, operations are extremely fast (sub-millisecond in many cases).
+- Redis supports multiple data structures used in this project:
+	- Strings: cache entries and rate-limit counters
+	- Sets: active users per room (`SADD`, `SREM`, `SCARD`)
+	- Lists: recent signaling queue per room (`RPUSH`, `LRANGE`, `LTRIM`)
+	- Hashes / Sorted Sets: available for advanced leaderboards/timestamps if needed later
+- In system design, Redis is commonly used for caching, session storage, pub/sub messaging, short-lived realtime state, and distributed rate limiting.
+
+### Implemented Redis features in HearTogether
+
+- Cache-aside room lookup for `GET /api/rooms/:code` with TTL and cache hit headers (`X-Cache: HIT|MISS`)
+- Redis-backed session store for auth session state (`heartogether.sid`)
+- Redis Pub/Sub event bus (`room-events`) for cross-service realtime event propagation
+- Realtime dynamic state:
+	- active users per room in Redis Sets
+	- recent signaling events in Redis Lists
+- Redis-backed rate limiting for room creation and room lookup endpoints
+
+### Redis setup
+
+Local development:
+
+```bash
+# macOS (homebrew)
+brew install redis
+brew services start redis
+
+# Linux
+sudo apt-get install redis-server
+sudo systemctl start redis
+
+# Windows (Docker)
+docker run -d --name heartogether-redis -p 6379:6379 redis:7
+```
+
+Production-like setup:
+
+- Use managed Redis (Redis Cloud, AWS ElastiCache, Azure Cache for Redis, Upstash)
+- Enable authentication and TLS where supported
+- Restrict network access to backend service only
 
 ## Project Structure
 
@@ -93,6 +138,16 @@ JWT_SECRET=replace_with_a_long_random_secret
 # EXPRESSTURN_USERNAME=your_username
 # EXPRESSTURN_CREDENTIAL=your_credential
 # (Legacy names also supported: TURN_URLS, TURN_USERNAME, TURN_CREDENTIAL)
+
+# Redis
+# REDIS_ENABLED=true
+# REDIS_URL=redis://127.0.0.1:6379
+# SESSION_SECRET=replace_with_a_long_random_secret
+# SESSION_COOKIE_SECURE=false
+# SESSION_TTL_SECONDS=86400
+# SESSION_TTL_MS=86400000
+# SESSION_KEY_PREFIX=session:
+# SESSION_COOKIE_NAME=heartogether.sid
 ```
 
 Client (`client/.env`):
@@ -178,8 +233,35 @@ Rooms:
 
 - `POST /api/rooms` (auth required)
 - `GET /api/rooms/:code`
+- `GET /api/rooms/:roomId/realtime` (auth required; Redis realtime diagnostics)
 - `GET /api/ice-servers`
 - `GET /api/health`
+
+Redis/system:
+
+- `GET /api/system/redis` (Redis connectivity status)
+- `POST /api/events/publish` (auth required; publish custom pub/sub event)
+
+## Redis Modules (Server)
+
+- `server/src/redis/client.js`: connection lifecycle, retry strategy, pub/sub clients
+- `server/src/redis/cache.js`: cache-aside helpers and TTL cache utilities
+- `server/src/redis/session.js`: Redis session store middleware
+- `server/src/redis/rateLimit.js`: distributed rate-limit middleware
+- `server/src/redis/realtime.js`: active-user sets and recent signal queues
+- `server/src/redis/pubsub.js`: publish/subscribe helpers for service events
+
+## Scalability Notes and Trade-offs
+
+- Redis improves scale by offloading frequent reads, centralizing short-lived state, and enabling multi-instance event propagation.
+- For larger deployments:
+	- Enable replication for read scaling/failover
+	- Use Sentinel/managed HA for automatic failover
+	- Use Redis Cluster for horizontal partitioning
+- Trade-offs:
+	- Memory-first model can be expensive at very high cardinality
+	- Persistence modes (RDB/AOF) add durability but can impact throughput depending on settings
+	- Redis is best for ephemeral/hot data, not as primary long-term database
 
 ## Notes
 

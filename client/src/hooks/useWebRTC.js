@@ -69,7 +69,8 @@ async function optimizeAudioSender(sender, label) {
   try {
     const params = sender.getParameters();
     params.encodings = params.encodings && params.encodings.length > 0 ? params.encodings : [{}];
-    params.encodings[0].maxBitrate = 64000;
+    params.encodings[0].maxBitrate = 128000;
+    params.encodings[0].dtx = false;
     params.encodings[0].networkPriority = 'high';
 
     await sender.setParameters(params);
@@ -77,6 +78,35 @@ async function optimizeAudioSender(sender, label) {
   } catch (err) {
     // Not all browsers support these sender parameters.
     debugLog(`[WebRTC] audio sender optimization skipped for ${label}:`, err?.message || err);
+  }
+}
+
+function applyOpusCodecPreference(pc, sender, label) {
+  if (!pc || !sender) return;
+  if (typeof RTCRtpSender === 'undefined' || typeof RTCRtpSender.getCapabilities !== 'function') return;
+
+  try {
+    const audioCaps = RTCRtpSender.getCapabilities('audio');
+    if (!audioCaps?.codecs?.length) return;
+
+    const opusCodecs = audioCaps.codecs.filter((codec) => {
+      const mime = String(codec.mimeType || '').toLowerCase();
+      return mime === 'audio/opus';
+    });
+    if (!opusCodecs.length) return;
+
+    const otherCodecs = audioCaps.codecs.filter((codec) => {
+      const mime = String(codec.mimeType || '').toLowerCase();
+      return mime !== 'audio/opus';
+    });
+
+    const transceiver = pc.getTransceivers().find((t) => t.sender === sender);
+    if (transceiver && typeof transceiver.setCodecPreferences === 'function') {
+      transceiver.setCodecPreferences([...opusCodecs, ...otherCodecs]);
+      debugLog(`[WebRTC] preferred Opus codec for ${label}`);
+    }
+  } catch (err) {
+    debugLog(`[WebRTC] codec preference skipped for ${label}:`, err?.message || err);
   }
 }
 
@@ -124,7 +154,11 @@ export function useHostWebRTC(socket, stream, iceServersConfig, { onPeerConnecti
         warnLog(`[WebRTC] WARNING: no audio tracks found in stream for ${listenerId}`);
       }
       audioTracks.forEach((track) => {
+        if ('contentHint' in track) {
+          track.contentHint = 'music';
+        }
         const sender = pc.addTrack(track, stream);
+        applyOpusCodecPreference(pc, sender, `host→${listenerId}`);
         optimizeAudioSender(sender, `host→${listenerId}`);
       });
 
@@ -316,6 +350,17 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
 
       pc.ontrack = (e) => {
         debugLog(`[WebRTC] received ontrack event from ${hostId}`, e.track);
+
+        // Lower playout buffering for closer host/listener synchronization.
+        if (e.receiver) {
+          if (typeof e.receiver.playoutDelayHint === 'number') {
+            e.receiver.playoutDelayHint = 0.04;
+          }
+          if (typeof e.receiver.jitterBufferTarget === 'number') {
+            e.receiver.jitterBufferTarget = 40;
+          }
+        }
+
         // Some mobile browsers fire ontrack before streams[] is populated —
         // fall back to constructing a stream directly from the track.
         const stream = (e.streams && e.streams.length > 0)
@@ -335,7 +380,7 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
         // button; the user's tap calls audio.play() inside a gesture context,
         // which is the only reliable way to start audio on mobile.
         debugLog(`[WebRTC] calling onTrackReady callback`);
-        onTrackReadyRef.current?.();
+        onTrackReadyRef.current?.(stream);
       };
 
       try {

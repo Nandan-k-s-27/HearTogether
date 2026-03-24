@@ -307,7 +307,18 @@ export default function HostRoom() {
     try {
       let mediaStream;
       if (type === 'mic') {
-        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            sampleRate: 48000,
+            sampleSize: 16,
+            latency: 0,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        });
       } else if (type === 'display') {
         if (!navigator.mediaDevices?.getDisplayMedia) {
           const err = 'Display capture is not supported on this device. Open HearTogether on a desktop browser, or use Microphone mode instead.';
@@ -329,6 +340,10 @@ export default function HostRoom() {
         mediaStream = await navigator.mediaDevices.getDisplayMedia({
           video: true,
           audio: {
+            channelCount: 2,
+            sampleRate: 48000,
+            sampleSize: 16,
+            latency: 0,
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false,

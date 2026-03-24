@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import socket from '../services/socket';
 import { useListenerWebRTC } from '../hooks/useWebRTC';
+import { useAudioPlaybackController } from '../hooks/useAudioPlaybackController';
 import { useOrientationLock, useWakeLock, isMobileDevice } from '../hooks/useMobile';
 import { getIceServers, pingServer } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
@@ -21,6 +22,7 @@ export default function ListenerRoom() {
   const { lockPortrait, unlockOrientation } = useOrientationLock();
   const { requestWakeLock, releaseWakeLock } = useWakeLock();
   const isMobile = isMobileDevice();
+  const { playbackState, controller } = useAudioPlaybackController();
 
   useEffect(() => {
     toastRef.current = toast;
@@ -29,9 +31,8 @@ export default function ListenerRoom() {
   const [status, setStatus] = useState('connecting'); // connecting | listening | paused | ended
   const [volume, setVolume] = useState(1);
   // audioReady  → remote stream has arrived, waiting for user tap to play
-  // audioPlaying → audio.play() succeeded, currently streaming
   const [audioReady, setAudioReady] = useState(false);
-  const [audioPlaying, setAudioPlaying] = useState(false);
+  const audioPlaying = playbackState.isPlaying;
   // connState tracks actual WebRTC ICE/DTLS state (not just socket signaling)
   const [connState, setConnState] = useState('new'); // new|connecting|connected|disconnected|failed|closed
   const [iceServersConfig, setIceServersConfig] = useState(null);
@@ -80,14 +81,37 @@ export default function ListenerRoom() {
   }, []);
 
   const { handleOffer, handleIceCandidate, close, audioRef, remoteStreamRef } = useListenerWebRTC(socket, {
-    onTrackReady: () => setAudioReady(true),
+    onTrackReady: (stream) => {
+      controller.setStream(stream);
+      setAudioReady(true);
+    },
     onConnectionState: setConnState,
     iceServersConfig,
   });
-  const audioElRef = useRef(null);
   const joinedRoomIdRef = useRef(null);
   const offerRetryTimerRef = useRef(null);
   const offerRetryAttemptsRef = useRef(0);
+
+  useEffect(() => {
+    if (typeof playbackState.volume === 'number' && Math.abs(playbackState.volume - volume) > 0.001) {
+      setVolume(playbackState.volume);
+    }
+  }, [playbackState.volume, volume]);
+
+  useEffect(() => {
+    if (audioPlaying) {
+      setAudioReady(false);
+    }
+  }, [audioPlaying]);
+
+  useEffect(() => {
+    const normalizedRoomCode = roomCode?.toUpperCase();
+    controller.setMetadata({
+      title: normalizedRoomCode ? `HearTogether Room ${normalizedRoomCode}` : 'HearTogether Live Stream',
+      artist: 'HearTogether',
+      album: 'Live Audio Session',
+    });
+  }, [controller, roomCode]);
 
   const clearOfferRetryTimer = useCallback(() => {
     if (offerRetryTimerRef.current) {
@@ -108,37 +132,26 @@ export default function ListenerRoom() {
   // cycle on every re-render, which would briefly set audioRef.current = null
   // and miss an ontrack event arriving in that window.
   const setAudioEl = useCallback((el) => {
-    audioElRef.current = el;
     audioRef.current = el;
+    controller.attachAudioElement(el);
     // If the stream arrived before the element mounted, attach it now.
-    if (el && remoteStreamRef.current && !el.srcObject) {
-      el.srcObject = remoteStreamRef.current;
-      el.muted = false;
+    if (el && remoteStreamRef.current) {
+      controller.setStream(remoteStreamRef.current);
     }
-  }, [audioRef, remoteStreamRef]);
+  }, [audioRef, controller, remoteStreamRef]);
 
   // Called by the "Tap to Hear" button — runs inside a real user-gesture context
   // so audio.play() is guaranteed to succeed on all mobile browsers.
-  const handleStartAudio = useCallback(() => {
-    const audio = audioElRef.current;
-    if (!audio) return;
-    // Safety net: wire up srcObject if ontrack fired while element was unmounted.
-    if (!audio.srcObject && remoteStreamRef.current) {
-      audio.srcObject = remoteStreamRef.current;
+  const handleStartAudio = useCallback(async () => {
+    if (remoteStreamRef.current) {
+      controller.setStream(remoteStreamRef.current);
     }
-    audio.muted = false;
-    audio.volume = volume;
-    audio
-      .play()
-      .then(() => {
-        setAudioReady(false);
-        setAudioPlaying(true);
-      })
-      .catch((err) => {
-        // Should never reach here inside a gesture handler, but log just in case.
-        errorLog('[HearTogether] play() failed:', err.name, err.message);
-      });
-  }, [volume, remoteStreamRef]);
+    controller.setVolume(volume);
+    const started = await controller.play();
+    if (started) {
+      setAudioReady(false);
+    }
+  }, [controller, remoteStreamRef, volume]);
 
   // Connect & join room — gated on iceReady so TURN credentials are loaded
   // into iceRef before the host's offer arrives and creates the peer connection.
@@ -207,10 +220,11 @@ export default function ListenerRoom() {
       clearOfferRetryTimer();
       clearDisconnectRecoveryTimer();
       joinedRoomIdRef.current = null;
+      controller.stop();
       close();
       socket.disconnect();
     };
-  }, [iceReady, roomCode, navigate, close, clearOfferRetryTimer, clearDisconnectRecoveryTimer, remoteStreamRef]);
+  }, [iceReady, roomCode, navigate, close, clearOfferRetryTimer, clearDisconnectRecoveryTimer, remoteStreamRef, controller]);
 
   // Keep Render awake: ping /api/health every 8 minutes.
   useEffect(() => {
@@ -244,12 +258,14 @@ export default function ListenerRoom() {
       debugLog(`[ListenerRoom] host stopped`);
       setStatus('ended');
       clearOfferRetryTimer();
+      controller.stop();
       close();
     };
     const onRemoved = () => {
       debugLog(`[ListenerRoom] removed by host`);
       setStatus('ended');
       clearOfferRetryTimer();
+      controller.stop();
       close();
     };
 
@@ -268,7 +284,7 @@ export default function ListenerRoom() {
       socket.off('host:stopped', onStopped);
       socket.off('host:removed', onRemoved);
     };
-  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer]);
+  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer, controller]);
 
   // Monitor connection state for errors
   useEffect(() => {
@@ -314,6 +330,7 @@ export default function ListenerRoom() {
   const handleLeave = () => {
     clearOfferRetryTimer();
     clearDisconnectRecoveryTimer();
+    controller.stop();
     close();
     socket.disconnect();
     // replace: true removes this room URL from history so pressing the device
@@ -346,13 +363,14 @@ export default function ListenerRoom() {
   const handleRetry = useCallback(() => {
     setIsRetrying(true);
     setConnError(null);
+    controller.stop();
     close(); // Close existing connection
     
     // Reload page after a short delay to reset everything cleanly
     setTimeout(() => {
       window.location.reload();
     }, 500);
-  }, [close]);
+  }, [close, controller]);
 
   const s = statusConfig[status];
 
@@ -498,7 +516,7 @@ export default function ListenerRoom() {
               onChange={(e) => {
                 const v = parseFloat(e.target.value);
                 setVolume(v);
-                if (audioElRef.current) audioElRef.current.volume = v;
+                controller.setVolume(v);
               }}
               className={`w-full accent-brand-500 ${isMobile ? 'h-2' : 'h-1'}`}
               style={{ WebkitAppearance: 'slider-horizontal' }}
