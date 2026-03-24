@@ -1,0 +1,63 @@
+<svg width="1200" height="560" viewBox="0 0 1200 560" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="560" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#1D4ED8" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#22D3EE" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="560" rx="24" fill="url(#bg)"/>
+  <text x="60" y="70" fill="#E2E8F0" font-size="34" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Host Journey</text>
+  <text x="60" y="108" fill="#94A3B8" font-size="20" font-family="Segoe UI, Arial, sans-serif">From sign-in to ending a live audio session</text>
+
+  <g>
+    <rect x="60" y="160" width="220" height="130" rx="16" fill="url(#card)" stroke="#60A5FA"/>
+    <text x="84" y="202" fill="#93C5FD" font-size="16" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Step 1</text>
+    <text x="84" y="232" fill="#F8FAFC" font-size="20" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Sign in</text>
+    <text x="84" y="258" fill="#CBD5E1" font-size="15" font-family="Segoe UI, Arial, sans-serif">Google account</text>
+  </g>
+
+  <g>
+    <rect x="340" y="160" width="220" height="130" rx="16" fill="url(#card)" stroke="#60A5FA"/>
+    <text x="364" y="202" fill="#93C5FD" font-size="16" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Step 2</text>
+    <text x="364" y="232" fill="#F8FAFC" font-size="20" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Create Room</text>
+    <text x="364" y="258" fill="#CBD5E1" font-size="15" font-family="Segoe UI, Arial, sans-serif">Get unique code</text>
+  </g>
+
+  <g>
+    <rect x="620" y="160" width="220" height="130" rx="16" fill="url(#card)" stroke="#60A5FA"/>
+    <text x="644" y="202" fill="#93C5FD" font-size="16" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Step 3</text>
+    <text x="644" y="232" fill="#F8FAFC" font-size="20" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Choose Audio</text>
+    <text x="644" y="258" fill="#CBD5E1" font-size="15" font-family="Segoe UI, Arial, sans-serif">System or mic</text>
+  </g>
+
+  <g>
+    <rect x="900" y="160" width="220" height="130" rx="16" fill="url(#card)" stroke="#60A5FA"/>
+    <text x="924" y="202" fill="#93C5FD" font-size="16" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Step 4</text>
+    <text x="924" y="232" fill="#F8FAFC" font-size="20" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Share Access</text>
+    <text x="924" y="258" fill="#CBD5E1" font-size="15" font-family="Segoe UI, Arial, sans-serif">Link, code, QR</text>
+  </g>
+
+  <g>
+    <rect x="340" y="350" width="220" height="130" rx="16" fill="url(#card)" stroke="#22D3EE"/>
+    <text x="364" y="392" fill="#67E8F9" font-size="16" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Step 5</text>
+    <text x="364" y="422" fill="#F8FAFC" font-size="20" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Monitor</text>
+    <text x="364" y="448" fill="#CBD5E1" font-size="15" font-family="Segoe UI, Arial, sans-serif">Listeners & reactions</text>
+  </g>
+
+  <g>
+    <rect x="620" y="350" width="220" height="130" rx="16" fill="url(#card)" stroke="#22D3EE"/>
+    <text x="644" y="392" fill="#67E8F9" font-size="16" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Step 6</text>
+    <text x="644" y="422" fill="#F8FAFC" font-size="20" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Pause / Stop</text>
+    <text x="644" y="448" fill="#CBD5E1" font-size="15" font-family="Segoe UI, Arial, sans-serif">Control session</text>
+  </g>
+
+  <path d="M280 224H332" stroke="#38BDF8" stroke-width="3" stroke-linecap="round"/>
+  <path d="M560 224H612" stroke="#38BDF8" stroke-width="3" stroke-linecap="round"/>
+  <path d="M840 224H892" stroke="#38BDF8" stroke-width="3" stroke-linecap="round"/>
+  <path d="M1010 292V332H730" stroke="#22D3EE" stroke-width="3" stroke-linecap="round"/>
+  <path d="M620 415H568" stroke="#22D3EE" stroke-width="3" stroke-linecap="round"/>
+</svg>

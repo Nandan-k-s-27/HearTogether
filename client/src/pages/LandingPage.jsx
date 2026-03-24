@@ -6,6 +6,7 @@ import { Component as DockBar } from '../components/ui/docks';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 import { UserProfile } from '../components/UserProfile';
+import ManualNavLink from '../components/ManualNavLink';
 import { useAuth } from '../context/AuthContext';
 
 export default function LandingPage() {
@@ -65,6 +66,7 @@ export default function LandingPage() {
         </div>
         <div className="flex w-full sm:w-auto items-center justify-end gap-2 sm:gap-4 flex-wrap">
           <UserProfile />
+          <ManualNavLink />
           <DockBar />
         </div>
       </nav>
