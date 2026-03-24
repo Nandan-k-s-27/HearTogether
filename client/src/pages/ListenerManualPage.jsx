@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight, Link2, LogIn, Headphones, Volume2, SmilePlus, DoorOpen } from 'lucide-react';
 import { GlowCard } from '../components/ui/spotlight-card';
+import { ListenerJourneyDiagram } from '../components/ManualJourneyDiagram';
 
 const steps = [
   {
@@ -72,12 +73,7 @@ export default function ListenerManualPage() {
                 This guide is for first-time listeners who want a smooth connection and clean audio.
               </p>
             </div>
-            <img
-              src="/manual/listener-flow.svg"
-              alt="Listener journey diagram"
-              className="w-full rounded-2xl border border-white/10 bg-black/20"
-              loading="lazy"
-            />
+            <ListenerJourneyDiagram />
           </div>
         </section>
 

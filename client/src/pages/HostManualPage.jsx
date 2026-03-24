@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight, PlayCircle, PauseCircle, Square, QrCode, Copy, Users, ShieldCheck } from 'lucide-react';
 import { GlowCard } from '../components/ui/spotlight-card';
+import { HostJourneyDiagram } from '../components/ManualJourneyDiagram';
 
 const steps = [
   {
@@ -72,12 +73,7 @@ export default function HostManualPage() {
                 Follow these steps in order once. After that, hosting takes less than a minute.
               </p>
             </div>
-            <img
-              src="/manual/host-flow.svg"
-              alt="Host journey diagram"
-              className="w-full rounded-2xl border border-white/10 bg-black/20"
-              loading="lazy"
-            />
+            <HostJourneyDiagram />
           </div>
         </section>
 
