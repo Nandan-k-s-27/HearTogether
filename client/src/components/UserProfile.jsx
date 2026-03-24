@@ -7,10 +7,20 @@ export function UserProfile() {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
 
+  const handleSwitch = async () => {
+    setOpen(false);
+    await switchAccount();
+  };
+
+  const handleLogout = async () => {
+    setOpen(false);
+    await logout();
+  };
+
   useEffect(() => {
     if (!open) return;
 
-    const onPointerDown = (event) => {
+    const onDocumentClick = (event) => {
       if (!menuRef.current?.contains(event.target)) {
         setOpen(false);
       }
@@ -22,13 +32,11 @@ export function UserProfile() {
       }
     };
 
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('click', onDocumentClick);
     document.addEventListener('keydown', onKeyDown);
 
     return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('click', onDocumentClick);
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [open]);
@@ -73,7 +81,10 @@ export function UserProfile() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-2 w-64 rounded-2xl border border-white/10 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-sm">
+        <div
+          className="absolute right-0 z-40 mt-2 w-64 rounded-2xl border border-white/10 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-sm"
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="mb-3 border-b border-white/10 pb-3 text-left">
             <p className="truncate text-sm font-semibold text-white">{user.name}</p>
             <p className="truncate text-xs text-gray-400">{user.email}</p>
@@ -82,21 +93,15 @@ export function UserProfile() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => {
-                setOpen(false);
-                switchAccount();
-              }}
-              className="flex-1 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/10"
+              onClick={handleSwitch}
+              className="flex-1 cursor-pointer rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/10"
             >
               Switch
             </button>
             <button
               type="button"
-              onClick={() => {
-                setOpen(false);
-                logout();
-              }}
-              className="flex-1 rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-2 text-xs font-semibold text-red-100 transition hover:bg-red-500/25"
+              onClick={handleLogout}
+              className="flex-1 cursor-pointer rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-2 text-xs font-semibold text-red-100 transition hover:bg-red-500/25"
             >
               Logout
             </button>
