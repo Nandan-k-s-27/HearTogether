@@ -21,6 +21,8 @@ const {
   setListenerReaction,
   getRoomByCode,
   getAllRooms,
+  addMessage,
+  getMessages,
 } = require('./rooms');
 const { createToken, verifyToken, authMiddleware, getOrCreateUser } = require('./auth');
 
@@ -98,7 +100,7 @@ const roomLookupLimiter = rateLimit({
 // Room lifecycle configuration
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 const MAX_TTL_MS = parseInt(process.env.ROOM_TTL_MS || String(60 * 60 * 1000), 10); // default 60 min
-const MAX_LISTENERS_PER_ROOM = parseInt(process.env.MAX_LISTENERS || '100', 10);
+const MAX_LISTENERS_PER_ROOM = parseInt(process.env.MAX_LISTENERS || '30', 10);
 
 setMaxListeners(MAX_LISTENERS_PER_ROOM);
 
@@ -440,7 +442,46 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Host controls
+  // Listener sends a text message (chat)
+  socket.on('listener:send-message', ({ text }) => {
+    const { role, roomId } = socket.data;
+    if (role !== 'listener' || !roomId) return;
+
+    const room = getRoom(roomId);
+    if (!room || !room.hostSocketId) return;
+    if (!room.listeners.has(socket.id)) return;
+
+    const normalizedText = String(text || '').trim().slice(0, 500);
+    if (!normalizedText) return;
+
+    const message = addMessage(
+      roomId,
+      socket.id,
+      socket.user?.email || null,
+      socket.user?.email ? socket.user.email.split('@')[0] : (socket.user?.name || null),
+      normalizedText
+    );
+    if (!message) return;
+
+    // Send message to host
+    io.to(room.hostSocketId).emit('listener:message', {
+      listenerId: socket.id,
+      listenerEmail: message.listenerEmail,
+      listenerName: message.listenerName,
+      text: message.text,
+      timestamp: message.timestamp,
+    });
+
+    console.log(`[message] from ${socket.id}: "${normalizedText.slice(0, 30)}..."`);
+  });
+
+  // Host requests message history when joining
+  socket.on('listener:request-messages', ({ roomId }, cb) => {
+    const room = getRoom(roomId);
+    if (!room || room.hostSocketId !== socket.id) return cb?.({ error: 'unauthorized' });
+    const messages = getMessages(roomId);
+    cb?.({ ok: true, messages });
+  });
   socket.on('host:pause', () => {
     const room = getAuthorizedHostRoom();
     if (!room) return;

@@ -106,6 +106,7 @@ export default function HostRoom() {
           email: listenerEmail || null,
           name: listenerName || null,
           reaction: null,
+          messages: [],
           joinedAt: Date.now(),
         }];
       });
@@ -158,12 +159,28 @@ export default function HostRoom() {
       );
     };
 
+    const onListenerMessage = ({ listenerId, text, timestamp }) => {
+      if (!listenerId || !text) return;
+      debugLog(`[HostRoom] message from ${listenerId}: "${text.slice(0, 30)}..."`);
+      setListeners((prev) =>
+        prev.map((listener) =>
+          listener.id === listenerId
+            ? {
+                ...listener,
+                messages: [...(listener.messages || []), { text, timestamp }].slice(-10), // keep last 10 messages
+              }
+            : listener,
+        ),
+      );
+    };
+
     socket.on('listener:joined', onListenerJoined);
     socket.on('listener:left', onListenerLeft);
     socket.on('signal:answer', onAnswer);
     socket.on('signal:ice-candidate', onIce);
     socket.on('listener:request-offer', onRequestOffer);
     socket.on('listener:reaction', onListenerReaction);
+    socket.on('listener:message', onListenerMessage);
 
     return () => {
       socket.off('listener:joined', onListenerJoined);
@@ -172,6 +189,7 @@ export default function HostRoom() {
       socket.off('signal:ice-candidate', onIce);
       socket.off('listener:request-offer', onRequestOffer);
       socket.off('listener:reaction', onListenerReaction);
+      socket.off('listener:message', onListenerMessage);
     };
   }, [stream, createOffer, handleAnswer, handleIceCandidate, removePeer]);
 

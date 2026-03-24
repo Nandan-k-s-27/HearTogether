@@ -4,9 +4,9 @@ const { nanoid } = require('nanoid');
 const rooms = new Map();
 
 // Configuration: max listeners per room (can be overridden via environment)
-let MAX_LISTENERS_PER_ROOM = parseInt(process.env.MAX_LISTENERS || '100', 10);
+let MAX_LISTENERS_PER_ROOM = parseInt(process.env.MAX_LISTENERS || '30', 10);
 if (isNaN(MAX_LISTENERS_PER_ROOM) || MAX_LISTENERS_PER_ROOM < 1) {
-  MAX_LISTENERS_PER_ROOM = 100;
+  MAX_LISTENERS_PER_ROOM = 30;
 }
 
 function setMaxListeners(limit) {
@@ -32,6 +32,7 @@ function createRoom() {
     hostSocketId: null,
     hostConnected: false,
     listeners: new Map(), // socketId -> { joinedAt }
+    messages: [], // array of { socketId, listenerEmail, listenerName, text, timestamp }
     createdAt: Date.now(),
     lastActivity: Date.now(),
   };
@@ -49,6 +50,7 @@ function createRoomWithId(id) {
     hostSocketId: null,
     hostConnected: false,
     listeners: new Map(),
+    messages: [],
     createdAt: Date.now(),
     lastActivity: Date.now(),
   };
@@ -111,6 +113,30 @@ function getAllRooms() {
   return Array.from(rooms.values());
 }
 
+// Add message to room history (keep last 50 messages)
+function addMessage(roomId, socketId, listenerEmail, listenerName, text) {
+  const room = rooms.get(roomId);
+  if (!room) return false;
+  const message = {
+    socketId,
+    listenerEmail,
+    listenerName,
+    text: String(text || '').trim().slice(0, 500),
+    timestamp: Date.now(),
+  };
+  room.messages.push(message);
+  if (room.messages.length > 50) {
+    room.messages.shift(); // keep only last 50
+  }
+  touchRoom(roomId);
+  return message;
+}
+
+function getMessages(roomId) {
+  const room = rooms.get(roomId);
+  return room ? room.messages : [];
+}
+
 module.exports = {
   createRoom,
   createRoomWithId,
@@ -124,4 +150,6 @@ module.exports = {
   removeListener,
   setListenerReaction,
   getAllRooms,
+  addMessage,
+  getMessages,
 };

@@ -25,6 +25,8 @@ export default function ListenerRoom() {
   const [iceServersConfig, setIceServersConfig] = useState(null);
   const [selectedReaction, setSelectedReaction] = useState('');
   const [showExtraReactions, setShowExtraReactions] = useState(false);
+  const [chatMessage, setChatMessage] = useState('');
+  const [showChat, setShowChat] = useState(false);
   // iceReady gates the socket join — we must not emit listener:join until the
   // ICE servers fetch has settled.  If the offer arrives before iceRef is
   // updated the RTCPeerConnection is created with STUN-only and TURN relay
@@ -243,6 +245,13 @@ export default function ListenerRoom() {
     setShowExtraReactions(false);
   };
 
+  const sendMessage = () => {
+    const text = chatMessage.trim();
+    if (!text || status === 'ended') return;
+    socket.emit('listener:send-message', { text });
+    setChatMessage('');
+  };
+
   const statusConfig = {
     connecting: { color: 'text-yellow-400', label: 'Connecting…' },
     listening: { color: 'text-green-400', label: 'Listening' },
@@ -399,6 +408,23 @@ export default function ListenerRoom() {
 
             {selectedReaction && (
               <p className="mt-3 text-xs text-gray-400">Your current reaction: <span className="text-base">{selectedReaction}</span></p>
+            )}
+          </div>
+        )}
+
+        {status !== 'ended' && (
+          <div className="mb-4 rounded-xl border border-white/10 bg-white/5 p-3">
+            <button type="button" onClick={() => setShowChat((v) => !v)} className="w-full text-left text-xs uppercase tracking-wider text-gray-400 hover:text-gray-300 transition font-semibold">
+              {showChat ? '▼ Message Host' : '▶ Message Host'}
+            </button>
+            {showChat && (
+              <div className="mt-3 space-y-2">
+                <div className="flex gap-2">
+                  <input type="text" value={chatMessage} onChange={(e) => setChatMessage(e.target.value.slice(0, 500))} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Say something..." className="flex-1 rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand-400" maxLength="500" />
+                  <button type="button" onClick={sendMessage} disabled={!chatMessage.trim()} className="rounded-lg bg-brand-500/80 px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed">Send</button>
+                </div>
+                <p className="text-xs text-gray-500">{chatMessage.length}/500</p>
+              </div>
             )}
           </div>
         )}

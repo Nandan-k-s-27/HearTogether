@@ -8,9 +8,11 @@ HearTogether is a real-time web audio sharing app. One user hosts audio, listene
 - Public landing and room preview pages; sign-in is requested only on action.
 - Post-login deep-link resume: listeners return directly to their intended room after OAuth.
 - Host dashboard with pause/resume/stop, per-listener remove, and listener identity (email-based).
+- **Listener engagement**: Simple emoji reactions + text chat (up to 500 chars per message) enable real-time interaction with the host.
 - System audio capture (tab/window/screen) and microphone capture options.
 - Stable account controls: signed-in users always see account identity and direct Switch/Logout actions.
 - Hardened backend with CORS allowlist, helmet headers, rate limiting, and stale-room cleanup.
+- **Scalability**: Configurable listener limit (default 30; realistic for Render free tier) prevents WebRTC degradation.
 
 ## Tech Stack
 
@@ -82,7 +84,7 @@ GOOGLE_CALLBACK_URL=http://localhost:3001/auth/google/callback
 JWT_SECRET=replace_with_a_long_random_secret
 
 # Room lifecycle (optional)
-# MAX_LISTENERS=100 (default: max listeners per room, prevents degradation from too many WebRTC peers)
+# MAX_LISTENERS=30 (default: max concurrent listeners per room; realistic for Render free tier)
 # ROOM_TTL_MS=3600000 (default: 60 min; rooms auto-expire after this inactivity period)
 
 # Optional TURN relay (recommended: ExpressTurn)
@@ -137,8 +139,8 @@ GOOGLE_CALLBACK_URL=https://your-backend.onrender.com/auth/google/callback
 JWT_SECRET=replace_with_a_long_random_secret
 PORT=3001
 
-# Room lifecycle safeguards (optional)
-MAX_LISTENERS=100 (listeners per room; default 100; prevents degradation from 50+ WebRTC peer connections)
+# Listener capacity & room lifecycle (optional; important for Render free tier)
+MAX_LISTENERS=30 (default; realistic max concurrent listeners per room to prevent WebRTC CPU exhaustion)
 ROOM_TTL_MS=3600000 (room inactivity timeout; default 60 minutes; auto-expire stale rooms)
 
 # Optional TURN relay for reliable mobile/cellular audio
