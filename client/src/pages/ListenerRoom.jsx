@@ -2,44 +2,27 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import socket from '../services/socket';
 import { useListenerWebRTC } from '../hooks/useWebRTC';
-import { useAudioPlaybackController } from '../hooks/useAudioPlaybackController';
-import { useOrientationLock, useWakeLock, isMobileDevice } from '../hooks/useMobile';
 import { getIceServers, pingServer } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 import { useToast, ToastContainer } from '../components/ui/toast';
-import { SkeletonBox, SkeletonButton } from '../components/ui/skeleton';
+import { SkeletonBox } from '../components/ui/skeleton';
 import { debugLog, warnLog, errorLog } from '../lib/logger';
 
 const QUICK_REACTIONS = ['❤️', '👍', '👎', '😭', '😍'];
 const EXTRA_REACTIONS = ['👏', '🔥', '🎉', '😮', '🙏', '😂', '🤯', '💯'];
-
-function formatDuration(seconds) {
-  const safe = Math.max(0, Number(seconds) || 0);
-  const mins = Math.floor(safe / 60);
-  const secs = safe % 60;
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
 
 export default function ListenerRoom() {
   const { code: roomCode } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
   const toastRef = useRef(toast);
-  const { lockPortrait, unlockOrientation } = useOrientationLock();
-  const { requestWakeLock, releaseWakeLock } = useWakeLock();
-  const isMobile = isMobileDevice();
-  const { playbackState, controller } = useAudioPlaybackController();
 
   useEffect(() => {
     toastRef.current = toast;
   }, [toast]);
 
   const [status, setStatus] = useState('connecting'); // connecting | listening | paused | ended
-  const [volume, setVolume] = useState(1);
-  // audioReady  → remote stream has arrived, waiting for user tap to play
-  const [audioReady, setAudioReady] = useState(false);
-  const audioPlaying = playbackState.isPlaying;
   // connState tracks actual WebRTC ICE/DTLS state (not just socket signaling)
   const [connState, setConnState] = useState('new'); // new|connecting|connected|disconnected|failed|closed
   const [iceServersConfig, setIceServersConfig] = useState(null);
@@ -47,8 +30,6 @@ export default function ListenerRoom() {
   const [showExtraReactions, setShowExtraReactions] = useState(false);
   const [chatMessage, setChatMessage] = useState('');
   const [showChat, setShowChat] = useState(false);
-  const [sessionLimitMs, setSessionLimitMs] = useState(60 * 60 * 1000);
-  const [sessionRemainingSec, setSessionRemainingSec] = useState(null);
   // iceReady gates the socket join — we must not emit listener:join until the
   // ICE servers fetch has settled.  If the offer arrives before iceRef is
   // updated the RTCPeerConnection is created with STUN-only and TURN relay
@@ -62,7 +43,6 @@ export default function ListenerRoom() {
   const [roomCapacity, setRoomCapacity] = useState(null);
   const prevConnStateRef = useRef('new');
   const disconnectRecoveryTimerRef = useRef(null);
-  const sessionExpiryMsRef = useRef(null);
 
   // Fetch TURN-capable ICE servers FIRST, then join the room.
   useEffect(() => {
@@ -90,10 +70,9 @@ export default function ListenerRoom() {
       });
   }, []);
 
-  const { handleOffer, handleIceCandidate, close, audioRef, remoteStreamRef } = useListenerWebRTC(socket, {
-    onTrackReady: (stream) => {
-      controller.setStream(stream);
-      setAudioReady(true);
+  const { handleOffer, handleIceCandidate, close, remoteStreamRef } = useListenerWebRTC(socket, {
+    onTrackReady: () => {
+      // Intentionally ignored: listener audio playback feature has been removed.
     },
     onConnectionState: setConnState,
     iceServersConfig,
@@ -101,27 +80,6 @@ export default function ListenerRoom() {
   const joinedRoomIdRef = useRef(null);
   const offerRetryTimerRef = useRef(null);
   const offerRetryAttemptsRef = useRef(0);
-
-  useEffect(() => {
-    if (typeof playbackState.volume === 'number' && Math.abs(playbackState.volume - volume) > 0.001) {
-      setVolume(playbackState.volume);
-    }
-  }, [playbackState.volume, volume]);
-
-  useEffect(() => {
-    if (audioPlaying) {
-      setAudioReady(false);
-    }
-  }, [audioPlaying]);
-
-  useEffect(() => {
-    const normalizedRoomCode = roomCode?.toUpperCase();
-    controller.setMetadata({
-      title: normalizedRoomCode ? `HearTogether Room ${normalizedRoomCode}` : 'HearTogether Live Stream',
-      artist: 'HearTogether',
-      album: 'Live Audio Session',
-    });
-  }, [controller, roomCode]);
 
   const clearOfferRetryTimer = useCallback(() => {
     if (offerRetryTimerRef.current) {
@@ -137,31 +95,6 @@ export default function ListenerRoom() {
       disconnectRecoveryTimerRef.current = null;
     }
   }, []);
-
-  // Stable callback ref — using useCallback avoids React's detach-reattach
-  // cycle on every re-render, which would briefly set audioRef.current = null
-  // and miss an ontrack event arriving in that window.
-  const setAudioEl = useCallback((el) => {
-    audioRef.current = el;
-    controller.attachAudioElement(el);
-    // If the stream arrived before the element mounted, attach it now.
-    if (el && remoteStreamRef.current) {
-      controller.setStream(remoteStreamRef.current);
-    }
-  }, [audioRef, controller, remoteStreamRef]);
-
-  // Called by the "Tap to Hear" button — runs inside a real user-gesture context
-  // so audio.play() is guaranteed to succeed on all mobile browsers.
-  const handleStartAudio = useCallback(async () => {
-    if (remoteStreamRef.current) {
-      controller.setStream(remoteStreamRef.current);
-    }
-    controller.setVolume(volume);
-    const started = await controller.play();
-    if (started) {
-      setAudioReady(false);
-    }
-  }, [controller, remoteStreamRef, volume]);
 
   // Connect & join room — gated on iceReady so TURN credentials are loaded
   // into iceRef before the host's offer arrives and creates the peer connection.
@@ -202,9 +135,6 @@ export default function ListenerRoom() {
         if (typeof res.listenerCount === 'number' && typeof res.maxListeners === 'number') {
           setRoomCapacity({ listenerCount: res.listenerCount, maxListeners: res.maxListeners });
         }
-        if (typeof res.sessionLimitMs === 'number' && res.sessionLimitMs > 0) {
-          setSessionLimitMs(res.sessionLimitMs);
-        }
 
         // Recovery path: if first offer gets missed due to timing, ask host
         // to resend it a few times while still waiting for a remote track.
@@ -233,26 +163,14 @@ export default function ListenerRoom() {
       clearOfferRetryTimer();
       clearDisconnectRecoveryTimer();
       joinedRoomIdRef.current = null;
-      controller.stop();
       close();
       socket.disconnect();
     };
-  }, [iceReady, roomCode, navigate, close, clearOfferRetryTimer, clearDisconnectRecoveryTimer, remoteStreamRef, controller]);
+  }, [iceReady, roomCode, navigate, close, clearOfferRetryTimer, clearDisconnectRecoveryTimer, remoteStreamRef]);
 
   // Keep Render awake: ping /api/health every 8 minutes.
   useEffect(() => {
     const id = setInterval(pingServer, 8 * 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    const updateCountdown = () => {
-      if (!sessionExpiryMsRef.current) return;
-      const remainingSec = Math.max(0, Math.ceil((sessionExpiryMsRef.current - Date.now()) / 1000));
-      setSessionRemainingSec(remainingSec);
-    };
-
-    const id = setInterval(updateCountdown, 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -282,26 +200,13 @@ export default function ListenerRoom() {
       debugLog(`[ListenerRoom] host stopped`);
       setStatus('ended');
       clearOfferRetryTimer();
-      controller.stop();
       close();
     };
     const onRemoved = () => {
       debugLog(`[ListenerRoom] removed by host`);
       setStatus('ended');
       clearOfferRetryTimer();
-      controller.stop();
       close();
-    };
-
-    const onSyncTimestamp = ({ sessionStartedAt, sessionLimitMs: syncedLimitMs }) => {
-      if (!sessionStartedAt || !Number.isFinite(sessionStartedAt)) return;
-      const effectiveLimit = Number.isFinite(syncedLimitMs) && syncedLimitMs > 0 ? syncedLimitMs : sessionLimitMs;
-      const expiry = Number(sessionStartedAt) + Number(effectiveLimit);
-      if (!Number.isFinite(expiry)) return;
-
-      sessionExpiryMsRef.current = expiry;
-      setSessionLimitMs(Number(effectiveLimit));
-      setSessionRemainingSec(Math.max(0, Math.ceil((expiry - Date.now()) / 1000)));
     };
 
     socket.on('signal:offer', onOffer);
@@ -310,7 +215,6 @@ export default function ListenerRoom() {
     socket.on('host:resumed', onResumed);
     socket.on('host:stopped', onStopped);
     socket.on('host:removed', onRemoved);
-    socket.on('sync:timestamp', onSyncTimestamp);
 
     return () => {
       socket.off('signal:offer', onOffer);
@@ -319,9 +223,8 @@ export default function ListenerRoom() {
       socket.off('host:resumed', onResumed);
       socket.off('host:stopped', onStopped);
       socket.off('host:removed', onRemoved);
-      socket.off('sync:timestamp', onSyncTimestamp);
     };
-  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer, controller, sessionLimitMs]);
+  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer]);
 
   // Monitor connection state for errors
   useEffect(() => {
@@ -349,25 +252,9 @@ export default function ListenerRoom() {
     }
   }, [connState, clearDisconnectRecoveryTimer]);
 
-  // Mobile: Lock orientation and manage screen wake lock during listening
-  useEffect(() => {
-    if (!audioPlaying) {
-      releaseWakeLock();
-      unlockOrientation();
-      return;
-    }
-
-    // When audio starts playing on mobile, lock to portrait and request wake lock
-    if (isMobile) {
-      lockPortrait();
-      requestWakeLock();
-    }
-  }, [audioPlaying, isMobile, lockPortrait, unlockOrientation, requestWakeLock, releaseWakeLock]);
-
   const handleLeave = () => {
     clearOfferRetryTimer();
     clearDisconnectRecoveryTimer();
-    controller.stop();
     close();
     socket.disconnect();
     // replace: true removes this room URL from history so pressing the device
@@ -400,26 +287,26 @@ export default function ListenerRoom() {
   const handleRetry = useCallback(() => {
     setIsRetrying(true);
     setConnError(null);
-    controller.stop();
     close(); // Close existing connection
 
     // Reload page after a short delay to reset everything cleanly
     setTimeout(() => {
       window.location.reload();
     }, 500);
-  }, [close, controller]);
+  }, [close]);
 
   const s = statusConfig[status];
 
   return (
     <div
-      className="flex min-h-screen flex-col items-center justify-start md:justify-center overflow-y-auto px-4 md:px-6 py-6 md:py-0"
-      style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
+      className="h-[100dvh] overflow-hidden px-3 py-3 md:px-6 md:py-4"
     >
       <ToastContainer toasts={toast.toasts} onRemove={toast.removeToast} />
-      <GlowCard customSize glowColor="blue" className="w-full max-w-md text-center">
-        <div className={isMobile ? 'px-4 py-6' : 'px-6 py-8'}>
-          <h1 className={`font-bold text-center ${isMobile ? 'text-3xl mb-8' : 'text-2xl mb-6'}`}>HearTogether</h1>
+      <GlowCard customSize glowColor="blue" className="mx-auto h-full w-full max-w-md text-center">
+        <div className="flex h-full flex-col px-4 py-4 md:px-6 md:py-6">
+          <h1 className="mb-4 text-center text-3xl font-bold md:mb-5 md:text-2xl">HearTogether</h1>
+
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
 
           {/* Status — hidden while the socket is still joining (connects near-
             instantly so showing a 'Connecting' flash is more confusing than
@@ -431,22 +318,6 @@ export default function ListenerRoom() {
               {roomCapacity && (
                 <p className="mt-1 text-xs text-gray-400">Listeners: {roomCapacity.listenerCount}/{roomCapacity.maxListeners}</p>
               )}
-              <div className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-                <p className="text-[10px] uppercase tracking-wider text-gray-500">Session Remaining</p>
-                <p className={`font-mono text-base font-semibold ${sessionRemainingSec === null
-                    ? 'text-gray-300'
-                    : sessionRemainingSec <= 60
-                      ? 'text-red-300'
-                      : sessionRemainingSec <= 5 * 60
-                        ? 'text-yellow-300'
-                        : 'text-blue-300'
-                  }`}>
-                  {sessionRemainingSec === null ? 'Waiting for host timer…' : formatDuration(sessionRemainingSec)}
-                </p>
-                <p className="text-[10px] text-gray-500">
-                  Session limit: {Math.floor(sessionLimitMs / 60000)} min
-                </p>
-              </div>
             </div>
           )}
           {status === 'connecting' && (
@@ -503,8 +374,8 @@ export default function ListenerRoom() {
             </div>
           )}
 
-          {/* WebRTC connection state — shown while audio is not yet playing */}
-          {!audioPlaying && status !== 'ended' && iceReady && (
+          {/* WebRTC connection state */}
+          {status !== 'ended' && iceReady && (
             <div className={`mb-4 flex items-center justify-center gap-2 text-xs rounded-lg px-3 py-2 ${connState === 'connected'
                 ? 'bg-green-900/40 text-green-300'
                 : connState === 'failed'
@@ -527,69 +398,12 @@ export default function ListenerRoom() {
             </div>
           )}
 
-          {/* Hidden audio element — playback triggered by user tap, not autoplay.
-            Do NOT set the HTML muted attribute here — some mobile browsers
-            (especially iOS Safari) treat a muted HTML attribute as sticky and
-            refuse to unmute via JS.  The element starts silent because it has
-            no srcObject; handleStartAudio() calls play() inside a user gesture. */}
-          <audio ref={setAudioEl} playsInline />
-
-          {/* Shown as soon as the remote stream arrives.
-            Must be a real tap/click so mobile browsers allow audio.play(). */}
-          {audioReady && !audioPlaying && (
-            <ShimmerButton
-              onClick={handleStartAudio}
-              background="rgba(76, 110, 245, 1)"
-              shimmerColor="#ffffff"
-              className={`dark:text-white mb-6 w-full font-semibold ${isMobile ? 'py-4 text-xl' : 'py-3 text-lg'}`}
-            >
-              Tap to Hear
-            </ShimmerButton>
-          )}
-
-          {/* Loading state while waiting for audio to be ready */}
-          {!audioReady && !audioPlaying && iceReady && status === 'listening' && (
-            <div className={`mb-6 ${isMobile ? 'h-14' : 'h-10'}`}>
-              <SkeletonButton />
-            </div>
-          )}
-
-          {/* Volume — only shown once playback has actually started */}
-          {audioPlaying && status !== 'ended' && (
-            <div className={`mb-6 ${isMobile ? 'space-y-3' : 'space-y-2'}`}>
-              <label className={`block text-gray-400 ${isMobile ? 'text-base' : 'text-sm'}`}>Volume</label>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={volume}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value);
-                  setVolume(v);
-                  controller.setVolume(v);
-                }}
-                className={`w-full accent-brand-500 ${isMobile ? 'h-2' : 'h-1'}`}
-                style={{ WebkitAppearance: 'slider-horizontal' }}
-              />
-              <p className={`text-gray-500 ${isMobile ? 'text-sm' : 'text-xs'}`}>{Math.round(volume * 100)}%</p>
-            </div>
-          )}
-
-          {/* Sync indicator */}
-          {audioPlaying && status === 'listening' && (
-            <div className="mb-4 flex items-center justify-center gap-2 text-xs text-green-400">
-              <span className="h-2 w-2 rounded-full bg-green-500" />
-              Connected
-            </div>
-          )}
-
           {/* Actions */}
           {status !== 'ended' && (
-            <div className={`mb-4 rounded-xl border border-white/10 bg-white/5 ${isMobile ? 'p-4' : 'p-3'}`}>
-              <p className={`mb-4 uppercase tracking-wider text-gray-400 ${isMobile ? 'text-sm' : 'text-xs'}`}>React to host</p>
+            <div className="mb-4 rounded-xl border border-white/10 bg-white/5 p-3 md:p-4">
+              <p className="mb-4 text-xs uppercase tracking-wider text-gray-400 md:text-sm">React to host</p>
 
-              <div className={`flex flex-wrap items-center justify-center ${isMobile ? 'gap-3' : 'gap-2'}`}>
+              <div className="flex flex-wrap items-center justify-center gap-2 md:gap-3">
                 {QUICK_REACTIONS.map((emoji) => (
                   <button
                     key={emoji}
@@ -598,7 +412,7 @@ export default function ListenerRoom() {
                     className={`rounded-lg border transition ${selectedReaction === emoji
                         ? 'border-brand-400 bg-brand-500/20'
                         : 'border-white/10 bg-black/20 hover:bg-white/10'
-                      } ${isMobile ? 'px-4 py-3 text-2xl' : 'px-3 py-1.5 text-lg'}`}
+                      } px-3 py-1.5 text-lg md:px-4 md:py-3 md:text-2xl`}
                     style={{ touchAction: 'manipulation' }}
                     aria-label={`React with ${emoji}`}
                   >
@@ -609,8 +423,7 @@ export default function ListenerRoom() {
                 <button
                   type="button"
                   onClick={() => setShowExtraReactions((v) => !v)}
-                  className={`rounded-lg border border-white/10 bg-black/20 font-semibold text-gray-200 transition hover:bg-white/10 ${isMobile ? 'px-4 py-3 text-lg' : 'px-3 py-1.5 text-sm'
-                    }`}
+                  className="rounded-lg border border-white/10 bg-black/20 px-3 py-1.5 text-sm font-semibold text-gray-200 transition hover:bg-white/10 md:px-4 md:py-3 md:text-lg"
                   style={{ touchAction: 'manipulation' }}
                   aria-label="More reactions"
                 >
@@ -619,7 +432,7 @@ export default function ListenerRoom() {
               </div>
 
               {showExtraReactions && (
-                <div className={`border-t border-white/10 pt-3 mt-3 flex flex-wrap items-center justify-center ${isMobile ? 'gap-3' : 'gap-2'}`}>
+                <div className="mt-3 flex flex-wrap items-center justify-center gap-2 border-t border-white/10 pt-3 md:gap-3">
                   {EXTRA_REACTIONS.map((emoji) => (
                     <button
                       key={emoji}
@@ -628,7 +441,7 @@ export default function ListenerRoom() {
                       className={`rounded-lg border transition ${selectedReaction === emoji
                           ? 'border-brand-400 bg-brand-500/20'
                           : 'border-white/10 bg-black/20 hover:bg-white/10'
-                        } ${isMobile ? 'px-4 py-3 text-2xl' : 'px-3 py-1.5 text-lg'}`}
+                        } px-3 py-1.5 text-lg md:px-4 md:py-3 md:text-2xl`}
                       style={{ touchAction: 'manipulation' }}
                       aria-label={`React with ${emoji}`}
                     >
@@ -639,63 +452,57 @@ export default function ListenerRoom() {
               )}
 
               {selectedReaction && (
-                <p className={`mt-3 text-gray-400 ${isMobile ? 'text-sm' : 'text-xs'}`}>
-                  Your current reaction: <span className={isMobile ? 'text-2xl' : 'text-base'}>{selectedReaction}</span>
+                <p className="mt-3 text-xs text-gray-400 md:text-sm">
+                  Your current reaction: <span className="text-base md:text-2xl">{selectedReaction}</span>
                 </p>
               )}
             </div>
           )}
 
           {status !== 'ended' && (
-            <div className={`mb-4 rounded-xl border border-white/10 bg-white/5 ${isMobile ? 'p-4' : 'p-3'}`}>
+            <div className="mb-4 rounded-xl border border-white/10 bg-white/5 p-3 md:p-4">
               <button
                 type="button"
                 onClick={() => setShowChat((v) => !v)}
-                className={`w-full text-left uppercase tracking-wider text-gray-400 hover:text-gray-300 transition font-semibold ${isMobile ? 'text-sm py-2' : 'text-xs py-1'
-                  }`}
+                className="w-full py-1 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 transition hover:text-gray-300 md:py-2 md:text-sm"
               >
                 {showChat ? '▼ Message Host' : '▶ Message Host'}
               </button>
               {showChat && (
-                <div className={`mt-3 space-y-2 ${isMobile ? 'space-y-3' : 'space-y-2'}`}>
-                  <div className={`flex gap-2 ${isMobile ? 'flex-col' : ''}`}>
+                <div className="mt-3 space-y-2 md:space-y-3">
+                  <div className="flex flex-col gap-2 md:flex-row">
                     <input
                       type="text"
                       value={chatMessage}
                       onChange={(e) => setChatMessage(e.target.value.slice(0, 50))}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                       placeholder="Say something..."
-                      className={`rounded-lg border border-white/20 bg-black/40 text-white placeholder-gray-500 focus:outline-none focus:border-brand-400 ${isMobile
-                          ? 'px-4 py-3 text-base flex-1'
-                          : 'px-3 py-2 text-xs'
-                        }`}
+                      className="flex-1 rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs text-white placeholder-gray-500 focus:border-brand-400 focus:outline-none md:px-4 md:py-3 md:text-base"
                       maxLength="50"
                     />
                     <button
                       type="button"
                       onClick={sendMessage}
                       disabled={!chatMessage.trim()}
-                      className={`rounded-lg bg-brand-500/80 font-semibold text-white transition hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed ${isMobile
-                          ? 'px-4 py-3 text-base'
-                          : 'px-3 py-2 text-xs'
-                        }`}
+                      className="rounded-lg bg-brand-500/80 px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50 md:px-4 md:py-3 md:text-base"
                     >
                       Send
                     </button>
                   </div>
-                  <p className={`text-gray-500 ${isMobile ? 'text-sm' : 'text-xs'}`}>{chatMessage.length}/50</p>
+                  <p className="text-xs text-gray-500 md:text-sm">{chatMessage.length}/50</p>
                 </div>
               )}
             </div>
           )}
+          </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="shrink-0 pt-2">
             {status === 'ended' ? (
               <ShimmerButton
                 onClick={() => navigate('/', { replace: true })}
                 background="rgba(76, 110, 245, 1)"
                 shimmerColor="#ffffff"
-                className={`dark:text-white w-full font-semibold ${isMobile ? 'py-4 text-lg' : 'py-3 text-base'}`}
+                className="w-full py-3 text-base font-semibold dark:text-white md:py-4 md:text-lg"
               >
                 Back to Home
               </ShimmerButton>
@@ -704,7 +511,7 @@ export default function ListenerRoom() {
                 onClick={handleLeave}
                 background="rgba(20, 20, 30, 0.95)"
                 shimmerColor="#5c7cfa"
-                className={`dark:text-white w-full font-semibold ${isMobile ? 'py-4 text-lg' : 'py-3 text-base'}`}
+                className="w-full py-3 text-base font-semibold dark:text-white md:py-4 md:text-lg"
               >
                 Leave Room
               </ShimmerButton>

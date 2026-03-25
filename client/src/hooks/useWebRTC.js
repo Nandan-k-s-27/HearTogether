@@ -269,17 +269,14 @@ export function useHostWebRTC(socket, stream, iceServersConfig, { onPeerConnecti
 }
 
 /**
- * Hook for the LISTENER side: receives audio from host.
+ * Hook for the LISTENER side.
  *
- * onTrackReady() is called as soon as a remote audio stream arrives, so the
- * UI can show a "Tap to play" button.  We never attempt autoplay ourselves —
- * all mobile browsers require an explicit user gesture before audio can play,
- * and relying on error-detection misses several browser-specific error codes.
+ * onTrackReady() is still fired when a remote track arrives so callers can
+ * react to stream availability without binding playback behavior here.
  */
 export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, iceServersConfig } = {}) {
   const pcRef = useRef(null);
   const remoteStreamRef = useRef(null);
-  const audioRef = useRef(null);
   // Ref-wrap callbacks so closures never hold stale values.
   const onTrackReadyRef = useRef(onTrackReady);
   const onConnectionStateRef = useRef(onConnectionState);
@@ -369,9 +366,7 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
 
         remoteStreamRef.current = stream;
 
-        // Tell the UI the stream is ready.  The UI will show a "Tap to play"
-        // button; the user's tap calls audio.play() inside a gesture context,
-        // which is the only reliable way to start audio on mobile.
+        // Tell the caller the stream is ready.
         debugLog(`[WebRTC] calling onTrackReady callback`);
         onTrackReadyRef.current?.(stream);
       };
@@ -407,5 +402,5 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
     hostIdRef.current = null;
   }, []);
 
-  return { handleOffer, handleIceCandidate, close, audioRef, remoteStreamRef };
+  return { handleOffer, handleIceCandidate, close, remoteStreamRef };
 }
