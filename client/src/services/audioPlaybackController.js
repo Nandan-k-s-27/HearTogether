@@ -19,7 +19,7 @@ class AudioPlaybackController {
     this.metadata = DEFAULT_METADATA;
     this.boundAudioEventHandler = () => this.syncState();
     this.boundPageRestoreHandler = () => this.syncState();
-    this.boundPageHideHandler = () => this.handlePageHide();
+    this.boundPageUnloadHandler = () => this.handlePageUnload();
 
     this.state = {
       isReady: false,
@@ -32,8 +32,10 @@ class AudioPlaybackController {
 
     window.addEventListener('pageshow', this.boundPageRestoreHandler);
     window.addEventListener('focus', this.boundPageRestoreHandler);
-    window.addEventListener('beforeunload', this.boundPageHideHandler);
-    window.addEventListener('pagehide', this.boundPageHideHandler);
+    // Do not stop on pagehide: mobile browsers can fire it when switching
+    // apps or locking the screen, which breaks background playback.
+    window.addEventListener('beforeunload', this.boundPageUnloadHandler);
+    window.addEventListener('unload', this.boundPageUnloadHandler);
 
     this.setupMediaSession();
   }
@@ -42,18 +44,25 @@ class AudioPlaybackController {
     if (!('mediaSession' in navigator)) return;
 
     this.applyMediaMetadata(this.metadata);
-
-    navigator.mediaSession.setActionHandler('play', async () => {
+    this.setMediaSessionActionHandler('play', async () => {
       await this.play();
     });
-
-    navigator.mediaSession.setActionHandler('pause', () => {
+    this.setMediaSessionActionHandler('pause', () => {
       this.pause();
     });
-
-    navigator.mediaSession.setActionHandler('stop', () => {
+    this.setMediaSessionActionHandler('stop', () => {
       this.stop();
     });
+  }
+
+  setMediaSessionActionHandler(action, handler) {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.setActionHandler(action, handler);
+    } catch (err) {
+      // Some actions are unsupported on older/mobile browser builds.
+      debugLog(`[AudioPlaybackController] media action '${action}' unsupported`, err?.message || err);
+    }
   }
 
   applyMediaMetadata(metadata) {
@@ -196,7 +205,7 @@ class AudioPlaybackController {
     this.updateMediaSessionPlaybackState(nextState.isPlaying ? 'playing' : 'paused');
   }
 
-  handlePageHide() {
+  handlePageUnload() {
     // If the browser tab is closed or the process is being torn down,
     // release playback resources so no stale element survives remounts.
     this.stop();
