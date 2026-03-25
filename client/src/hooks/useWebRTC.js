@@ -369,13 +369,6 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
 
         remoteStreamRef.current = stream;
 
-        // Prime the audio element if it is already in the DOM.
-        if (audioRef.current) {
-          debugLog(`[WebRTC] attaching stream to audio element`);
-          audioRef.current.srcObject = stream;
-          audioRef.current.muted = false;
-        }
-
         // Tell the UI the stream is ready.  The UI will show a "Tap to play"
         // button; the user's tap calls audio.play() inside a gesture context,
         // which is the only reliable way to start audio on mobile.

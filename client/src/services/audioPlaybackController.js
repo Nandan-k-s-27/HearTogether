@@ -16,9 +16,10 @@ class AudioPlaybackController {
     this.currentStream = null;
     this.subscribers = new Set();
     this.hasUserActivatedPlayback = false;
+    this.shouldResumeOnRestore = false;
     this.metadata = DEFAULT_METADATA;
     this.boundAudioEventHandler = () => this.syncState();
-    this.boundPageRestoreHandler = () => this.syncState();
+    this.boundPageRestoreHandler = () => this.handlePageRestore();
     this.boundPageUnloadHandler = () => this.handlePageUnload();
 
     this.state = {
@@ -100,8 +101,8 @@ class AudioPlaybackController {
   attachAudioElement(el) {
     if (this.audioEl === el) return;
 
-    if (this.audioEl) {
-      this.removeAudioEventListeners(this.audioEl);
+    if (this.audioEl && this.audioEl !== el) {
+      this.cleanupAudioElement(this.audioEl, { releaseSource: true });
     }
 
     this.audioEl = el || null;
@@ -113,10 +114,17 @@ class AudioPlaybackController {
 
     this.addAudioEventListeners(this.audioEl);
     this.audioEl.playsInline = true;
+    this.audioEl.preload = 'none';
+    this.audioEl.muted = false;
+    this.audioEl.volume = this.state.volume;
 
     if (this.currentStream && this.audioEl.srcObject !== this.currentStream) {
       this.audioEl.srcObject = this.currentStream;
       this.audioEl.muted = false;
+    }
+
+    if (this.shouldResumeOnRestore && this.currentStream) {
+      this.resumeIfNeeded();
     }
 
     this.syncState();
@@ -129,6 +137,8 @@ class AudioPlaybackController {
       this.audioEl.srcObject = this.currentStream;
       if (this.currentStream) {
         this.audioEl.muted = false;
+      } else {
+        this.audioEl.pause();
       }
     }
 
@@ -137,6 +147,10 @@ class AudioPlaybackController {
       ended: false,
       lastError: null,
     });
+
+    if (this.currentStream && this.shouldResumeOnRestore) {
+      this.resumeIfNeeded();
+    }
   }
 
   async play() {
@@ -153,6 +167,7 @@ class AudioPlaybackController {
       }
       await this.audioEl.play();
       this.hasUserActivatedPlayback = true;
+      this.shouldResumeOnRestore = true;
       this.applyMediaMetadata(this.metadata);
       this.syncState();
       return true;
@@ -165,17 +180,14 @@ class AudioPlaybackController {
 
   pause() {
     if (!this.audioEl) return;
+    this.shouldResumeOnRestore = false;
     this.audioEl.pause();
     this.syncState();
   }
 
   stop() {
-    if (this.audioEl) {
-      this.audioEl.pause();
-      this.audioEl.srcObject = null;
-      this.audioEl.removeAttribute('src');
-      this.audioEl.load();
-    }
+    this.shouldResumeOnRestore = false;
+    if (this.audioEl) this.cleanupAudioElement(this.audioEl, { releaseSource: true });
 
     this.currentStream = null;
     this.hasUserActivatedPlayback = false;
@@ -210,9 +222,47 @@ class AudioPlaybackController {
     };
 
     this.updateState(nextState);
+
+    if (nextState.ended) {
+      this.shouldResumeOnRestore = false;
+    }
+
     if (this.hasUserActivatedPlayback || !nextState.isPlaying) {
       this.updateMediaSessionPlaybackState(nextState.isPlaying ? 'playing' : 'paused');
     }
+  }
+
+  cleanupAudioElement(el, options = {}) {
+    const { releaseSource = false } = options;
+    this.removeAudioEventListeners(el);
+
+    try {
+      el.pause();
+      if (releaseSource) {
+        el.srcObject = null;
+        el.removeAttribute('src');
+        el.load();
+      }
+    } catch (err) {
+      debugLog('[AudioPlaybackController] cleanupAudioElement ignored error', err);
+    }
+  }
+
+  async resumeIfNeeded() {
+    if (!this.audioEl || !this.currentStream || !this.shouldResumeOnRestore) return;
+    if (!this.audioEl.paused && !this.audioEl.ended) return;
+
+    try {
+      await this.audioEl.play();
+      this.syncState();
+    } catch (err) {
+      debugLog('[AudioPlaybackController] resumeIfNeeded play() blocked', err?.message || err);
+    }
+  }
+
+  handlePageRestore() {
+    this.syncState();
+    this.resumeIfNeeded();
   }
 
   handlePageUnload() {
