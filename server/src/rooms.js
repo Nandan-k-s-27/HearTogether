@@ -81,10 +81,17 @@ function touchRoom(id) {
   }
 }
 
-function addListener(roomId, socketId) {
+function addListener(roomId, socketId, meta = {}) {
   const room = rooms.get(roomId);
   if (!room) return;
-  room.listeners.set(socketId, { joinedAt: Date.now(), reaction: null, reactedAt: null });
+  room.listeners.set(socketId, {
+    joinedAt: Date.now(),
+    reaction: null,
+    reactedAt: null,
+    userId: meta.userId || null,
+    email: meta.email || null,
+    name: meta.name || null,
+  });
   touchRoom(roomId);
 }
 

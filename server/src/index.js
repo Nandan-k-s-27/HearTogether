@@ -411,6 +411,14 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   console.log(`[socket] connected: ${socket.id} (user: ${socket.user.email})`);
 
+  function emitListenerCount(room) {
+    if (!room) return;
+    io.to(room.id).emit('room:listener-count', {
+      listenerCount: room.listeners.size,
+      maxListeners: getMaxListeners(),
+    });
+  }
+
   function getAuthorizedHostRoom() {
     const { roomId, role } = socket.data;
     if (role !== 'host' || !roomId) return null;
@@ -453,13 +461,51 @@ io.on('connection', (socket) => {
     if (!room) return cb?.({ error: 'Room not found' });
     if (!room.hostConnected) return cb?.({ error: 'Host not connected' });
 
+    // Reconnect dedupe: keep a single active listener entry per authenticated user.
+    const duplicateSocketIds = [];
+    for (const [existingSocketId, listener] of room.listeners.entries()) {
+      if (
+        listener?.userId && socket.user?.id && listener.userId === socket.user.id
+        || listener?.email && socket.user?.email && listener.email === socket.user.email
+      ) {
+        duplicateSocketIds.push(existingSocketId);
+      }
+    }
+
+    duplicateSocketIds.forEach((existingSocketId) => {
+      removeListener(room.id, existingSocketId);
+      removeActiveUser(room.id, existingSocketId).catch(() => {});
+
+      if (room.hostSocketId) {
+        io.to(room.hostSocketId).emit('listener:left', {
+          listenerId: existingSocketId,
+          listenerCount: room.listeners.size,
+        });
+      }
+
+      const existingSocket = io.sockets.sockets.get(existingSocketId);
+      if (existingSocket) {
+        existingSocket.leave(room.id);
+        existingSocket.data.role = null;
+        existingSocket.data.roomId = null;
+        existingSocket.emit('session:replaced');
+        existingSocket.disconnect(true);
+      }
+    });
+
     // Check listener limit
     const maxListeners = getMaxListeners();
     if (room.listeners.size >= maxListeners) {
       return cb?.({ error: `Room is full (${maxListeners} listeners max)` });
     }
 
-    addListener(room.id, socket.id);
+    addListener(room.id, socket.id, {
+      userId: socket.user?.id || null,
+      email: socket.user?.email || null,
+      name: socket.user?.email
+        ? socket.user.email.split('@')[0]
+        : (socket.user?.name || null),
+    });
     socket.join(room.id);
     socket.data.role = 'listener';
     socket.data.roomId = room.id;
@@ -481,6 +527,8 @@ io.on('connection', (socket) => {
       listenerName: socket.user?.email ? socket.user.email.split('@')[0] : (socket.user?.name || null),
       listenerCount: room.listeners.size,
     });
+
+    emitListenerCount(room);
 
     console.log(`[room ${room.code}] listener ${socket.id} joined (${room.listeners.size}/${maxListeners} total)`);
   });
@@ -652,6 +700,7 @@ io.on('connection', (socket) => {
     io.to(listenerId).emit('host:removed');
     const listenerSocket = io.sockets.sockets.get(listenerId);
     if (listenerSocket) listenerSocket.leave(room.id);
+    emitListenerCount(room);
   });
 
   // Sync: host broadcasts its timestamp periodically
@@ -691,6 +740,7 @@ io.on('connection', (socket) => {
           listenerCount: room.listeners.size,
         });
       }
+      emitListenerCount(room);
       console.log(`[room ${room.code}] listener ${socket.id} left (${room.listeners.size} remaining)`);
     }
   });

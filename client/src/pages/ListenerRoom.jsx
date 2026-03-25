@@ -209,12 +209,33 @@ export default function ListenerRoom() {
       close();
     };
 
+    const onListenerCount = ({ listenerCount, maxListeners }) => {
+      if (typeof listenerCount !== 'number') return;
+      setRoomCapacity((prev) => ({
+        listenerCount,
+        maxListeners: typeof maxListeners === 'number'
+          ? maxListeners
+          : (prev?.maxListeners || 0),
+      }));
+    };
+
+    const onSessionReplaced = () => {
+      toastRef.current.warning('You were reconnected from another session. This tab will now close its connection.');
+      clearOfferRetryTimer();
+      clearDisconnectRecoveryTimer();
+      close();
+      socket.disconnect();
+      navigate('/', { replace: true });
+    };
+
     socket.on('signal:offer', onOffer);
     socket.on('signal:ice-candidate', onIce);
     socket.on('host:paused', onPaused);
     socket.on('host:resumed', onResumed);
     socket.on('host:stopped', onStopped);
     socket.on('host:removed', onRemoved);
+    socket.on('room:listener-count', onListenerCount);
+    socket.on('session:replaced', onSessionReplaced);
 
     return () => {
       socket.off('signal:offer', onOffer);
@@ -223,8 +244,17 @@ export default function ListenerRoom() {
       socket.off('host:resumed', onResumed);
       socket.off('host:stopped', onStopped);
       socket.off('host:removed', onRemoved);
+      socket.off('room:listener-count', onListenerCount);
+      socket.off('session:replaced', onSessionReplaced);
     };
-  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer]);
+  }, [
+    handleOffer,
+    handleIceCandidate,
+    close,
+    clearOfferRetryTimer,
+    clearDisconnectRecoveryTimer,
+    navigate,
+  ]);
 
   // Monitor connection state for errors
   useEffect(() => {
