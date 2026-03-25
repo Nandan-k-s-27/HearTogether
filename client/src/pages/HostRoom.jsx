@@ -57,7 +57,7 @@ export default function HostRoom() {
       errorLog(`[HostRoom] failed to fetch ICE servers:`, err);
       toast.warning('Could not load relay servers. Peer connections may be slower.');
     });
-  }, []);
+  }, [toast]);
 
   const onPeerConnectionState = useCallback((listenerId, state) => {
     setListenerConnStates((prev) => {

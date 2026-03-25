@@ -89,7 +89,7 @@ export function AuthProvider({ children }) {
     };
 
     checkAuth();
-  }, [BACKEND_URL]);
+  }, []);
 
   // Handle OAuth callback from Google (redirect with token in URL)
   useEffect(() => {

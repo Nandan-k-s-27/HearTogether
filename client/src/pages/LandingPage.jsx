@@ -76,7 +76,7 @@ export default function LandingPage() {
         </h1>
 
         <p className="mt-4 max-w-xl text-lg text-gray-500 dark:text-gray-400">
-          Stream audio from one device to everyone's headphones in real time.
+          Stream audio from one device to everyone&apos;s headphones in real time.
           No Bluetooth pairing, no extra hardware — just the web.
         </p>
 
