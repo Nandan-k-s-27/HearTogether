@@ -30,6 +30,8 @@ export default function ListenerRoom() {
   const [showExtraReactions, setShowExtraReactions] = useState(false);
   const [chatMessage, setChatMessage] = useState('');
   const [showChat, setShowChat] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
   // iceReady gates the socket join — we must not emit listener:join until the
   // ICE servers fetch has settled.  If the offer arrives before iceRef is
   // updated the RTCPeerConnection is created with STUN-only and TURN relay
@@ -43,6 +45,28 @@ export default function ListenerRoom() {
   const [roomCapacity, setRoomCapacity] = useState(null);
   const prevConnStateRef = useRef('new');
   const disconnectRecoveryTimerRef = useRef(null);
+  const audioElRef = useRef(null);
+
+  const resetAudioElement = useCallback(() => {
+    const el = audioElRef.current;
+    if (!el) {
+      setAudioReady(false);
+      setAudioPlaying(false);
+      return;
+    }
+
+    try {
+      el.pause();
+      el.srcObject = null;
+      el.removeAttribute('src');
+      el.load();
+    } catch {
+      // Ignore cleanup failures from browser lifecycle transitions.
+    }
+
+    setAudioReady(false);
+    setAudioPlaying(false);
+  }, []);
 
   // Fetch TURN-capable ICE servers FIRST, then join the room.
   useEffect(() => {
@@ -71,8 +95,13 @@ export default function ListenerRoom() {
   }, []);
 
   const { handleOffer, handleIceCandidate, close, remoteStreamRef } = useListenerWebRTC(socket, {
-    onTrackReady: () => {
-      // Intentionally ignored: listener audio playback feature has been removed.
+    onTrackReady: (stream) => {
+      const el = audioElRef.current;
+      if (el) {
+        el.srcObject = stream;
+        el.muted = false;
+      }
+      setAudioReady(true);
     },
     onConnectionState: setConnState,
     iceServersConfig,
@@ -160,10 +189,11 @@ export default function ListenerRoom() {
       clearOfferRetryTimer();
       clearDisconnectRecoveryTimer();
       joinedRoomIdRef.current = null;
+      resetAudioElement();
       close();
       socket.disconnect();
     };
-  }, [iceReady, close, clearOfferRetryTimer, clearDisconnectRecoveryTimer, joinRoomWithRetry]);
+  }, [iceReady, close, clearOfferRetryTimer, clearDisconnectRecoveryTimer, joinRoomWithRetry, resetAudioElement]);
 
   useEffect(() => {
     if (!iceReady) return;
@@ -181,6 +211,7 @@ export default function ListenerRoom() {
       setConnError('Network interrupted. Reconnecting…');
       clearOfferRetryTimer();
       clearDisconnectRecoveryTimer();
+      resetAudioElement();
       close();
     };
 
@@ -191,7 +222,44 @@ export default function ListenerRoom() {
       socket.io.off('reconnect', onReconnect);
       socket.off('disconnect', onDisconnect);
     };
-  }, [iceReady, joinRoomWithRetry, clearOfferRetryTimer, clearDisconnectRecoveryTimer, close]);
+  }, [iceReady, joinRoomWithRetry, clearOfferRetryTimer, clearDisconnectRecoveryTimer, close, resetAudioElement]);
+
+  useEffect(() => {
+    const el = audioElRef.current;
+    if (!el) return undefined;
+
+    const onPlay = () => setAudioPlaying(true);
+    const onPause = () => setAudioPlaying(false);
+    const onEnded = () => setAudioPlaying(false);
+
+    el.addEventListener('play', onPlay);
+    el.addEventListener('pause', onPause);
+    el.addEventListener('ended', onEnded);
+
+    return () => {
+      el.removeEventListener('play', onPlay);
+      el.removeEventListener('pause', onPause);
+      el.removeEventListener('ended', onEnded);
+    };
+  }, []);
+
+  const handleStartAudio = useCallback(async () => {
+    const el = audioElRef.current;
+    if (!el) return;
+
+    if (remoteStreamRef.current && el.srcObject !== remoteStreamRef.current) {
+      el.srcObject = remoteStreamRef.current;
+    }
+
+    try {
+      await el.play();
+      setAudioPlaying(true);
+      setAudioReady(false);
+    } catch (err) {
+      toastRef.current.error('Tap to allow audio playback on this device.');
+      debugLog('[ListenerRoom] play() failed', err?.message || err);
+    }
+  }, [remoteStreamRef]);
 
   // Keep Render awake: ping /api/health every 8 minutes.
   useEffect(() => {
@@ -225,12 +293,14 @@ export default function ListenerRoom() {
       debugLog(`[ListenerRoom] host stopped`);
       setStatus('ended');
       clearOfferRetryTimer();
+      resetAudioElement();
       close();
     };
     const onRemoved = () => {
       debugLog(`[ListenerRoom] removed by host`);
       setStatus('ended');
       clearOfferRetryTimer();
+      resetAudioElement();
       close();
     };
 
@@ -248,6 +318,7 @@ export default function ListenerRoom() {
       toastRef.current.warning('You were reconnected from another session. This tab will now close its connection.');
       clearOfferRetryTimer();
       clearDisconnectRecoveryTimer();
+      resetAudioElement();
       close();
       socket.disconnect();
       navigate('/', { replace: true });
@@ -279,6 +350,7 @@ export default function ListenerRoom() {
     clearOfferRetryTimer,
     clearDisconnectRecoveryTimer,
     navigate,
+    resetAudioElement,
   ]);
 
   // Monitor connection state for errors
@@ -310,6 +382,7 @@ export default function ListenerRoom() {
   const handleLeave = () => {
     clearOfferRetryTimer();
     clearDisconnectRecoveryTimer();
+    resetAudioElement();
     close();
     socket.disconnect();
     // replace: true removes this room URL from history so pressing the device
@@ -342,13 +415,14 @@ export default function ListenerRoom() {
   const handleRetry = useCallback(() => {
     setIsRetrying(true);
     setConnError(null);
+    resetAudioElement();
     close(); // Close existing connection
 
     // Reload page after a short delay to reset everything cleanly
     setTimeout(() => {
       window.location.reload();
     }, 500);
-  }, [close]);
+  }, [close, resetAudioElement]);
 
   const s = statusConfig[status];
 
@@ -451,6 +525,19 @@ export default function ListenerRoom() {
               {connState === 'failed' && 'Connection failed — try reconnecting'}
               {connState === 'closed' && 'Connection closed'}
             </div>
+          )}
+
+          <audio ref={audioElRef} preload="none" />
+
+          {audioReady && !audioPlaying && status !== 'ended' && (
+            <ShimmerButton
+              onClick={handleStartAudio}
+              background="rgba(76, 110, 245, 1)"
+              shimmerColor="#ffffff"
+              className="mb-4 w-full py-3 text-base font-semibold dark:text-white md:py-4 md:text-lg"
+            >
+              Tap to Hear
+            </ShimmerButton>
           )}
 
           {/* Actions */}
