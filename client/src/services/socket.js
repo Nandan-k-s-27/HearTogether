@@ -10,11 +10,22 @@ if (import.meta.env.DEV) {
 const socket = io(BACKEND_URL, {
   autoConnect: false,
   transports: ['websocket', 'polling'],
+  timeout: 20000,
   reconnection: true,
-  reconnectionDelay: 1000,
+  reconnectionDelay: 800,
   reconnectionDelayMax: 20000,
+  randomizationFactor: 0.5,
   reconnectionAttempts: Infinity,
 });
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    if (!socket.connected) {
+      debugLog('[Socket] Browser is back online, reconnecting socket');
+      socket.connect();
+    }
+  });
+}
 
 /**
  * Set authentication token for Socket.IO connection.

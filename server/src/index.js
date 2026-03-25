@@ -67,7 +67,12 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
-const io = new Server(server, { cors: corsOptions });
+const io = new Server(server, {
+  cors: corsOptions,
+  pingInterval: 10000,
+  pingTimeout: 60000,
+  connectTimeout: 30000,
+});
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors(corsOptions));

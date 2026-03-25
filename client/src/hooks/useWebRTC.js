@@ -10,7 +10,7 @@ import { debugLog, warnLog, errorLog } from '../lib/logger';
 //   iceTransportPolicy  – 'all' means host, srflx AND relay (TURN) candidates
 //     are tried; without this some browsers skip relay candidates silently.
 const EXTRA_PC_OPTIONS = {
-  iceCandidatePoolSize: 10,
+  iceCandidatePoolSize: 4,
   bundlePolicy: 'max-bundle',
   iceTransportPolicy: 'all',
 };
@@ -67,18 +67,63 @@ async function optimizeAudioSender(sender, label) {
   if (typeof sender.getParameters !== 'function' || typeof sender.setParameters !== 'function') return;
 
   try {
+    const network = navigator?.connection || navigator?.mozConnection || navigator?.webkitConnection;
+    const downlinkMbps = Number(network?.downlink || 0);
+    const effectiveType = String(network?.effectiveType || '').toLowerCase();
+
+    // Prefer stable narrowband over glitchy wideband when bandwidth is poor.
+    let targetBitrate = 64000;
+    if (effectiveType === 'slow-2g' || effectiveType === '2g') targetBitrate = 20000;
+    else if (effectiveType === '3g' || downlinkMbps > 0 && downlinkMbps < 1.2) targetBitrate = 28000;
+    else if (effectiveType === '4g' && downlinkMbps > 0 && downlinkMbps < 2.5) targetBitrate = 42000;
+
     const params = sender.getParameters();
     params.encodings = params.encodings && params.encodings.length > 0 ? params.encodings : [{}];
-    params.encodings[0].maxBitrate = 128000;
-    params.encodings[0].dtx = false;
+    params.encodings[0].maxBitrate = targetBitrate;
+    params.encodings[0].dtx = true;
+    params.encodings[0].ptime = 20;
     params.encodings[0].networkPriority = 'high';
 
     await sender.setParameters(params);
-    debugLog(`[WebRTC] optimized audio sender params for ${label}`);
+    debugLog(`[WebRTC] optimized audio sender params for ${label} bitrate=${targetBitrate}`);
   } catch (err) {
     // Not all browsers support these sender parameters.
     debugLog(`[WebRTC] audio sender optimization skipped for ${label}:`, err?.message || err);
   }
+}
+
+function tuneOpusSdp(sdp) {
+  if (!sdp || !/a=rtpmap:(\d+) opus\/48000\/2/i.test(sdp)) return sdp;
+
+  const opusPayload = sdp.match(/a=rtpmap:(\d+) opus\/48000\/2/i)?.[1];
+  if (!opusPayload) return sdp;
+
+  const opusFmtpRegex = new RegExp(`a=fmtp:${opusPayload}\\s+([^\\r\\n]*)`, 'i');
+  const desiredParams = ['minptime=10', 'useinbandfec=1', 'usedtx=1', 'maxaveragebitrate=42000', 'stereo=0'];
+
+  if (opusFmtpRegex.test(sdp)) {
+    return sdp.replace(opusFmtpRegex, (_line, params) => {
+      const current = String(params || '')
+        .split(';')
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      const map = new Map();
+      current.forEach((item) => {
+        const [k, v = ''] = item.split('=');
+        map.set(k.toLowerCase(), `${k.toLowerCase()}=${v}`);
+      });
+      desiredParams.forEach((item) => {
+        const [k] = item.split('=');
+        map.set(k, item);
+      });
+
+      return `a=fmtp:${opusPayload} ${Array.from(map.values()).join(';')}`;
+    });
+  }
+
+  const injection = `a=fmtp:${opusPayload} ${desiredParams.join(';')}\r\n`;
+  return sdp.replace(new RegExp(`a=rtpmap:${opusPayload} opus/48000/2\\r\\n`, 'i'), (line) => `${line}${injection}`);
 }
 
 function applyOpusCodecPreference(pc, sender, label) {
@@ -155,7 +200,7 @@ export function useHostWebRTC(socket, stream, iceServersConfig, { onPeerConnecti
       }
       audioTracks.forEach((track) => {
         if ('contentHint' in track) {
-          track.contentHint = 'music';
+          track.contentHint = 'speech';
         }
         const sender = pc.addTrack(track, stream);
         applyOpusCodecPreference(pc, sender, `host→${listenerId}`);
@@ -223,6 +268,7 @@ export function useHostWebRTC(socket, stream, iceServersConfig, { onPeerConnecti
 
       try {
         const offer = await pc.createOffer();
+        offer.sdp = tuneOpusSdp(offer.sdp);
         debugLog(`[WebRTC] offer created for ${listenerId}`);
         await pc.setLocalDescription(offer);
         debugLog(`[WebRTC] sending offer to ${listenerId}`);
@@ -301,6 +347,7 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
         try {
           await existingPc.setRemoteDescription(new RTCSessionDescription(offer));
           const answer = await existingPc.createAnswer();
+          answer.sdp = tuneOpusSdp(answer.sdp);
           await existingPc.setLocalDescription(answer);
           socket.emit('signal:answer', { to: hostId, answer });
           debugLog(`[WebRTC] sent answer for ICE restart to ${hostId}`);
@@ -375,6 +422,7 @@ export function useListenerWebRTC(socket, { onTrackReady, onConnectionState, ice
         debugLog(`[WebRTC] setting remote description (offer) from ${hostId}`);
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
         const answer = await pc.createAnswer();
+        answer.sdp = tuneOpusSdp(answer.sdp);
         debugLog(`[WebRTC] created answer for ${hostId}`);
         await pc.setLocalDescription(answer);
         debugLog(`[WebRTC] sending answer to ${hostId}`);

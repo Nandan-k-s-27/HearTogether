@@ -96,24 +96,16 @@ export default function ListenerRoom() {
     }
   }, []);
 
-  // Connect & join room — gated on iceReady so TURN credentials are loaded
-  // into iceRef before the host's offer arrives and creates the peer connection.
-  useEffect(() => {
-    if (!iceReady) return;
-    if (!socket.connected) socket.connect();
-
+  const joinRoomWithRetry = useCallback(() => {
     let retries = 0;
-    const MAX_RETRIES = 5;
-    const RETRY_DELAY = 1200; // ms
+    const MAX_RETRIES = 6;
+    const RETRY_DELAY = 1200;
 
-    function tryJoin() {
+    const tryJoin = () => {
       socket.emit('listener:join', { roomCode }, (res) => {
         if (res?.error) {
-          // "Room not found" can happen when the server just restarted and the
-          // host hasn't re-joined yet.  Retry a few times with backoff before
-          // giving up and navigating home.
-          if (res.error.includes('not found') && retries < MAX_RETRIES) {
-            retries++;
+          if (String(res.error).toLowerCase().includes('not found') && retries < MAX_RETRIES) {
+            retries += 1;
             setTimeout(tryJoin, RETRY_DELAY * retries);
             return;
           }
@@ -124,11 +116,10 @@ export default function ListenerRoom() {
             return;
           }
           toastRef.current.error(res.error || 'Could not join this room');
-          // replace: true removes this room URL from history so pressing back
-          // from home does not re-mount this component and attempt reconnect.
           navigate('/', { replace: true });
           return;
         }
+
         setStatus('listening');
         setJoinError('');
         joinedRoomIdRef.current = res.roomId;
@@ -136,8 +127,6 @@ export default function ListenerRoom() {
           setRoomCapacity({ listenerCount: res.listenerCount, maxListeners: res.maxListeners });
         }
 
-        // Recovery path: if first offer gets missed due to timing, ask host
-        // to resend it a few times while still waiting for a remote track.
         clearOfferRetryTimer();
         offerRetryTimerRef.current = setInterval(() => {
           const roomId = joinedRoomIdRef.current;
@@ -147,17 +136,25 @@ export default function ListenerRoom() {
             return;
           }
           offerRetryAttemptsRef.current += 1;
-          if (offerRetryAttemptsRef.current > 8) {
+          if (offerRetryAttemptsRef.current > 10) {
             clearOfferRetryTimer();
             return;
           }
-          debugLog(`[ListenerRoom] no remote track yet, requesting offer retry #${offerRetryAttemptsRef.current}`);
+          debugLog(`[ListenerRoom] requesting offer retry #${offerRetryAttemptsRef.current}`);
           socket.emit('listener:request-offer', { roomId });
         }, 1200);
       });
-    }
+    };
 
     tryJoin();
+  }, [roomCode, navigate, clearOfferRetryTimer, remoteStreamRef]);
+
+  // Connect & join room — gated on iceReady so TURN credentials are loaded
+  // into iceRef before the host's offer arrives and creates the peer connection.
+  useEffect(() => {
+    if (!iceReady) return;
+    if (!socket.connected) socket.connect();
+    joinRoomWithRetry();
 
     return () => {
       clearOfferRetryTimer();
@@ -166,7 +163,35 @@ export default function ListenerRoom() {
       close();
       socket.disconnect();
     };
-  }, [iceReady, roomCode, navigate, close, clearOfferRetryTimer, clearDisconnectRecoveryTimer, remoteStreamRef]);
+  }, [iceReady, close, clearOfferRetryTimer, clearDisconnectRecoveryTimer, joinRoomWithRetry]);
+
+  useEffect(() => {
+    if (!iceReady) return;
+
+    const onReconnect = () => {
+      debugLog('[ListenerRoom] socket reconnected, rejoining room');
+      setStatus('connecting');
+      setConnError(null);
+      joinRoomWithRetry();
+    };
+
+    const onDisconnect = (reason) => {
+      debugLog('[ListenerRoom] socket disconnected', reason);
+      setStatus('connecting');
+      setConnError('Network interrupted. Reconnecting…');
+      clearOfferRetryTimer();
+      clearDisconnectRecoveryTimer();
+      close();
+    };
+
+    socket.io.on('reconnect', onReconnect);
+    socket.on('disconnect', onDisconnect);
+
+    return () => {
+      socket.io.off('reconnect', onReconnect);
+      socket.off('disconnect', onDisconnect);
+    };
+  }, [iceReady, joinRoomWithRetry, clearOfferRetryTimer, clearDisconnectRecoveryTimer, close]);
 
   // Keep Render awake: ping /api/health every 8 minutes.
   useEffect(() => {
