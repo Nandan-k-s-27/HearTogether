@@ -13,8 +13,10 @@ HearTogether is a real-time web audio sharing app. One user hosts audio, listene
 - Stable account controls: signed-in users always see account identity and direct Switch/Logout actions.
 - Hardened backend with CORS allowlist, helmet headers, rate limiting, and stale-room cleanup.
 - **Scalability**: Configurable listener limit (default 30; realistic for Render free tier) prevents WebRTC degradation.
-- **Android playback polish**: Listener audio uses a singleton playback controller with Media Session metadata/actions (play/pause/stop).
-- **Background playback support**: No visibility-based auto-stop for listener audio; wake lock/orientation and socket reconnection are tuned for mobile tab suspend/resume.
+- **Realtime resilience**: Listener dedupe on reconnect avoids duplicate participants in host view.
+- **Accurate dynamic counts**: Server emits `room:listener-count` updates on join/leave/remove, and listeners update count live.
+- **Host reconciliation fallback**: Host periodically reconciles listener list against server canonical state to heal missed/out-of-order events.
+- **Low-network tuning**: WebRTC transport includes Opus tuning (FEC/DTX/bitrate shaping) and improved socket reconnect behavior.
 
 ## Tech Stack
 
@@ -235,6 +237,7 @@ Rooms:
 
 - `POST /api/rooms` (auth required)
 - `GET /api/rooms/:code`
+- `GET /api/rooms/:roomId/listeners` (auth required; host-only canonical listener snapshot)
 - `GET /api/rooms/:roomId/realtime` (auth required; Redis realtime diagnostics)
 - `GET /api/ice-servers`
 - `GET /api/health`
@@ -269,6 +272,7 @@ Redis/system:
 
 - The browser warning about "Self-XSS" in console is expected and unrelated to app security defects.
 - Listener identity shown to the host uses authenticated user email for easier moderation.
+- Listener room currently focuses on connection/reaction/chat state and does not include direct audio playback controls.
 
 ## Security Notes
 
@@ -287,9 +291,9 @@ Redis/system:
 
 ## Troubleshooting
 
-### "Waiting for Stream" — Listener stuck connecting
+### Listener stuck in reconnecting/connecting state
 
-If listeners are stuck on "Waiting for stream…" or "Connecting audio path…", check these in order:
+If listener or host is stuck in reconnect loops, check these in order:
 
 #### 1. **Check TURN Configuration**
 
@@ -306,7 +310,7 @@ EXPRESSTURN_USERNAME=...
 EXPRESSTURN_CREDENTIAL=...
 ```
 
-#### 2. **Check Offer Delivery**
+#### 2. **Check Signaling Delivery**
 
 In **Host** browser console (F12), look for:
 - `[HostRoom] listener joined: <id>` (listener connected to host)
@@ -332,16 +336,15 @@ Look for in both consoles:
 
 If **no relay candidates**, TURN config is wrong or not reaching the client. Verify EXPRESSTURN_* vars are set correctly on Render.
 
-#### 4. **Check WebRTC Connection State**
+#### 4. **Check WebRTC Connection State and Recovery**
 
 Look for state transitions:
 ```
 [WebRTC] listener←<host-id> connectionState: new
 [WebRTC] listener←<host-id> connectionState: connecting
-[WebRTC] listener←<host-id> iceCatheringState: gathering
+[WebRTC] listener←<host-id> iceGatheringState: gathering
 [WebRTC] listener←<host-id> connectionState: connected
-[WebRTC] received ontrack event from <host-id>
-[ListenerRoom] calling onTrackReady callback
+[WebRTC] host→<listener-id> ICE restart #1
 ```
 
 **If stuck on "connecting":** ICE couldn't establish a path. Common causes:
@@ -366,6 +369,21 @@ SSH into Render and tail logs for signaling issues:
 - `WARN: offer is empty or null` — host sent malformed offer
 - `WARN: target socket X not found` — routing failed, listener socket disconnected
 - No `[ice-servers]` logs — backend didn't process the API call
+
+### Listener count mismatch recovery
+
+The app now includes automatic correction:
+
+- Server emits `room:listener-count` to room members whenever listener membership changes.
+- Host periodically reconciles listener list from `GET /api/rooms/:roomId/listeners`.
+
+If counts still look wrong:
+
+1. Ensure host socket is authenticated and joined as host.
+2. Verify `GET /api/rooms/:roomId/listeners` returns expected listener objects.
+3. Check browser console for reconciliation logs:
+	- `[HostRoom] reconcile diff: -X +Y ~Z`
+	- `[HostRoom] reconcile removed stale listeners: ...`
 
 #### 6. **Test Locally First**
 
