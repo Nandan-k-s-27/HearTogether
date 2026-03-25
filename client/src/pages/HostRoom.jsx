@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import socket from '../services/socket';
 import { useHostWebRTC } from '../hooks/useWebRTC';
-import { getIceServers, pingServer } from '../services/api';
+import { getHostRoomListeners, getIceServers, pingServer } from '../services/api';
 import { GlowCard } from '../components/ui/spotlight-card';
 import { ShimmerButton } from '../components/ui/shimmer-button';
 import { UserProfile } from '../components/UserProfile';
@@ -73,11 +73,117 @@ export default function HostRoom() {
     { onPeerConnectionState },
   );
   const syncInterval = useRef(null);
+  const listenersRef = useRef([]);
+  const reconcileInFlightRef = useRef(false);
   // streamRef always holds the current stream — safe to use inside async callbacks
   // without worrying about stale closures over the `stream` state variable.
   const streamRef = useRef(null);
   // handleStopRef ensures track 'ended' listeners always invoke the latest handleStop.
   const handleStopRef = useRef(null);
+
+  useEffect(() => {
+    listenersRef.current = listeners;
+  }, [listeners]);
+
+  const reconcileListeners = useCallback(async () => {
+    if (!roomId || reconcileInFlightRef.current) return;
+
+    reconcileInFlightRef.current = true;
+    try {
+      const snapshot = await getHostRoomListeners(roomId);
+      if (!snapshot || !Array.isArray(snapshot.listeners)) return;
+
+      if (typeof snapshot.maxListeners === 'number' && snapshot.maxListeners > 0) {
+        setMaxListeners(snapshot.maxListeners);
+      }
+
+      const serverMap = new Map(snapshot.listeners.map((listener) => [listener.socketId, listener]));
+      const current = listenersRef.current;
+      const localMap = new Map(current.map((listener) => [listener.id, listener]));
+
+      const staleLocalIds = [];
+      for (const listener of current) {
+        if (!serverMap.has(listener.id)) staleLocalIds.push(listener.id);
+      }
+
+      if (staleLocalIds.length > 0) {
+        debugLog(`[HostRoom] reconcile removed stale listeners: ${staleLocalIds.join(', ')}`);
+        staleLocalIds.forEach((listenerId) => removePeer(listenerId));
+        setListenerConnStates((prev) => {
+          const next = { ...prev };
+          staleLocalIds.forEach((listenerId) => delete next[listenerId]);
+          return next;
+        });
+      }
+
+      const additions = [];
+      const updates = [];
+      for (const [socketId, serverListener] of serverMap.entries()) {
+        const local = localMap.get(socketId);
+        if (!local) {
+          additions.push({
+            id: socketId,
+            email: serverListener.email || null,
+            name: serverListener.name || null,
+            reaction: serverListener.reaction || null,
+            messages: [],
+            joinedAt: serverListener.joinedAt || Date.now(),
+            lastActivityAt: serverListener.reactedAt || serverListener.joinedAt || Date.now(),
+          });
+          continue;
+        }
+
+        const nextName = local.name || serverListener.name || null;
+        const nextEmail = local.email || serverListener.email || null;
+        const nextReaction = serverListener.reaction || local.reaction || null;
+        if (nextName !== local.name || nextEmail !== local.email || nextReaction !== local.reaction) {
+          updates.push({ socketId, name: nextName, email: nextEmail, reaction: nextReaction });
+        }
+      }
+
+      const needRemoval = staleLocalIds.length > 0;
+      const needAdditions = additions.length > 0;
+      const needUpdates = updates.length > 0;
+
+      if (needRemoval || needAdditions || needUpdates) {
+        debugLog(
+          `[HostRoom] reconcile diff: -${staleLocalIds.length} +${additions.length} ~${updates.length}`,
+        );
+      }
+
+      if (needRemoval || needAdditions || needUpdates) {
+        setListeners((prev) => {
+          let next = needRemoval
+            ? prev.filter((listener) => !staleLocalIds.includes(listener.id))
+            : [...prev];
+
+          if (needUpdates) {
+            const updateMap = new Map(updates.map((item) => [item.socketId, item]));
+            next = next.map((listener) => {
+              const patch = updateMap.get(listener.id);
+              if (!patch) return listener;
+              return {
+                ...listener,
+                name: patch.name,
+                email: patch.email,
+                reaction: patch.reaction,
+              };
+            });
+          }
+
+          if (needAdditions) {
+            next = [...next, ...additions];
+          }
+
+          return next;
+        });
+      }
+    } catch (err) {
+      debugLog('[HostRoom] reconcile skipped due to transient error', err?.message || err);
+    } finally {
+      reconcileInFlightRef.current = false;
+    }
+  }, [roomId, removePeer]);
 
   // Connect socket & join room
   useEffect(() => {
@@ -142,11 +248,15 @@ export default function HostRoom() {
             setSessionRemainingSec(Math.floor(res.sessionLimitMs / 1000));
           }
         }
+
+        setTimeout(() => {
+          reconcileListeners();
+        }, 400);
       });
     };
     socket.io.on('reconnect', onReconnect);
     return () => socket.io.off('reconnect', onReconnect);
-  }, [roomId, navigate]);
+  }, [roomId, navigate, reconcileListeners]);
 
   // Keep Render awake: ping /api/health every 8 minutes.
   // Render free tier spins down after 15 min of no HTTP requests;
@@ -155,6 +265,17 @@ export default function HostRoom() {
     const id = setInterval(pingServer, 8 * 60 * 1000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (!roomId) return;
+
+    reconcileListeners();
+    const id = setInterval(() => {
+      reconcileListeners();
+    }, 8000);
+
+    return () => clearInterval(id);
+  }, [roomId, reconcileListeners]);
 
   // Listen for signaling events
   useEffect(() => {

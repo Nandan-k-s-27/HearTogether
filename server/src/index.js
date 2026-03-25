@@ -370,6 +370,42 @@ app.get('/api/rooms/:code', roomLookupLimiter, (req, res) => {
     });
 });
 
+app.get('/api/rooms/:roomId/listeners', authMiddleware, (req, res) => {
+  const roomId = String(req.params.roomId || '').trim();
+  if (!roomId) return res.status(400).json({ error: 'roomId is required' });
+
+  const room = getRoom(roomId);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+
+  const hostSocket = room.hostSocketId ? io.sockets.sockets.get(room.hostSocketId) : null;
+  if (!hostSocket) return res.status(409).json({ error: 'Host is not connected' });
+
+  const sameUser = Boolean(
+    (req.user?.id && hostSocket.user?.id && req.user.id === hostSocket.user.id)
+    || (req.user?.email && hostSocket.user?.email && req.user.email === hostSocket.user.email),
+  );
+
+  if (!sameUser) return res.status(403).json({ error: 'Forbidden' });
+
+  const listeners = Array.from(room.listeners.entries()).map(([socketId, listener]) => ({
+    socketId,
+    userId: listener?.userId || null,
+    email: listener?.email || null,
+    name: listener?.name || null,
+    reaction: listener?.reaction || null,
+    joinedAt: listener?.joinedAt || null,
+    reactedAt: listener?.reactedAt || null,
+  }));
+
+  res.json({
+    roomId: room.id,
+    listenerCount: listeners.length,
+    maxListeners: getMaxListeners(),
+    listeners,
+    fetchedAt: Date.now(),
+  });
+});
+
 // Socket.IO signaling - with authentication middleware
 function getTokenFromCookieHeader(cookieHeader) {
   if (!cookieHeader) return null;
