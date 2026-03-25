@@ -1,18 +1,25 @@
 {
+  "id": "/",
   "name": "HearTogether",
   "short_name": "HearTogether",
   "description": "Listen to shared live audio together in real time.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "background_color": "#0b1220",
   "theme_color": "#4c6ef5",
   "orientation": "portrait-primary",
-  "categories": ["music", "entertainment"],
+  "categories": ["music", "audio", "entertainment"],
   "icons": [
     {
       "src": "/favicon.png",
-      "sizes": "any",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
       "type": "image/png"
     },
     {

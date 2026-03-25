@@ -12,12 +12,7 @@ const socket = io(BACKEND_URL, {
   transports: ['websocket', 'polling'],
   reconnection: true,
   reconnectionDelay: 1000,
-  // CRITICAL: Android Chrome suspends WebSockets when the tab is backgrounded
-  // or the screen is locked.  The previous limit of 5 attempts meant the socket
-  // died permanently after ~30 seconds in the background.  When the server saw
-  // the disconnect it emitted `host:stopped` / `listener:left` and tore down
-  // the room.  Infinite retries let the socket recover when the user returns.
-  reconnectionDelayMax: 30000,
+  reconnectionDelayMax: 20000,
   reconnectionAttempts: Infinity,
 });
 

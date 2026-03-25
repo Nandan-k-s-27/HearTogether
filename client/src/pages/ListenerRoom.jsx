@@ -239,30 +239,6 @@ export default function ListenerRoom() {
     };
   }, [iceReady, roomCode, navigate, close, clearOfferRetryTimer, clearDisconnectRecoveryTimer, remoteStreamRef, controller]);
 
-  // Re-join room when socket recovers from a background disconnection.
-  // Android suspends WebSockets when backgrounded; when the socket reconnects
-  // (which now uses Infinity retries), we need to re-establish room membership
-  // and get a fresh WebRTC offer.
-  useEffect(() => {
-    const onReconnect = () => {
-      debugLog('[ListenerRoom] socket reconnected, re-joining room');
-      socket.emit('listener:join', { roomCode }, (res) => {
-        if (res?.error) {
-          warnLog('[ListenerRoom] rejoin after reconnect failed:', res.error);
-          return;
-        }
-        joinedRoomIdRef.current = res.roomId;
-        setStatus('listening');
-        debugLog('[ListenerRoom] re-joined room after reconnect, requesting fresh offer');
-        // Request a fresh offer to re-establish the WebRTC peer connection
-        socket.emit('listener:request-offer', { roomId: res.roomId });
-      });
-    };
-
-    socket.io.on('reconnect', onReconnect);
-    return () => socket.io.off('reconnect', onReconnect);
-  }, [roomCode]);
-
   // Keep Render awake: ping /api/health every 8 minutes.
   useEffect(() => {
     const id = setInterval(pingServer, 8 * 60 * 1000);
@@ -308,8 +284,6 @@ export default function ListenerRoom() {
       clearOfferRetryTimer();
       controller.stop();
       close();
-      releaseWakeLock();
-      unlockOrientation();
     };
     const onRemoved = () => {
       debugLog(`[ListenerRoom] removed by host`);
@@ -317,8 +291,6 @@ export default function ListenerRoom() {
       clearOfferRetryTimer();
       controller.stop();
       close();
-      releaseWakeLock();
-      unlockOrientation();
     };
 
     const onSyncTimestamp = ({ sessionStartedAt, sessionLimitMs: syncedLimitMs }) => {
@@ -349,7 +321,7 @@ export default function ListenerRoom() {
       socket.off('host:removed', onRemoved);
       socket.off('sync:timestamp', onSyncTimestamp);
     };
-  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer, controller, sessionLimitMs, releaseWakeLock, unlockOrientation]);
+  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer, controller, sessionLimitMs]);
 
   // Monitor connection state for errors
   useEffect(() => {
@@ -377,16 +349,20 @@ export default function ListenerRoom() {
     }
   }, [connState, clearDisconnectRecoveryTimer]);
 
-  // Mobile: Lock orientation and acquire wake lock when audio starts playing.
-  // We intentionally do NOT release the wake lock here when audioPlaying flips
-  // to false — that can happen transiently during ICE renegotiation and should
-  // not wake-kill the screen.  Release is handled explicitly in handleLeave,
-  // onStopped, and onRemoved below.
+  // Mobile: Lock orientation and manage screen wake lock during listening
   useEffect(() => {
-    if (!audioPlaying || !isMobile) return;
-    lockPortrait();
-    requestWakeLock();
-  }, [audioPlaying, isMobile, lockPortrait, requestWakeLock]);
+    if (!audioPlaying) {
+      releaseWakeLock();
+      unlockOrientation();
+      return;
+    }
+
+    // When audio starts playing on mobile, lock to portrait and request wake lock
+    if (isMobile) {
+      lockPortrait();
+      requestWakeLock();
+    }
+  }, [audioPlaying, isMobile, lockPortrait, unlockOrientation, requestWakeLock, releaseWakeLock]);
 
   const handleLeave = () => {
     clearOfferRetryTimer();
@@ -394,8 +370,6 @@ export default function ListenerRoom() {
     controller.stop();
     close();
     socket.disconnect();
-    releaseWakeLock();
-    unlockOrientation();
     // replace: true removes this room URL from history so pressing the device
     // back button from home does not land back here and attempt reconnect.
     navigate('/', { replace: true });
@@ -428,7 +402,7 @@ export default function ListenerRoom() {
     setConnError(null);
     controller.stop();
     close(); // Close existing connection
-    
+
     // Reload page after a short delay to reset everything cleanly
     setTimeout(() => {
       window.location.reload();
@@ -447,304 +421,295 @@ export default function ListenerRoom() {
         <div className={isMobile ? 'px-4 py-6' : 'px-6 py-8'}>
           <h1 className={`font-bold text-center ${isMobile ? 'text-3xl mb-8' : 'text-2xl mb-6'}`}>HearTogether</h1>
 
-        {/* Status — hidden while the socket is still joining (connects near-
+          {/* Status — hidden while the socket is still joining (connects near-
             instantly so showing a 'Connecting' flash is more confusing than
             helpful; the connState pill below already covers ICE progress). */}
-        {status !== 'connecting' && (
-          <div className="mb-6">
-            <p className={`text-lg font-semibold ${s.color}`}>{s.label}</p>
-            <p className="mt-1 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
-            {roomCapacity && (
-              <p className="mt-1 text-xs text-gray-400">Listeners: {roomCapacity.listenerCount}/{roomCapacity.maxListeners}</p>
-            )}
-            <div className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wider text-gray-500">Session Remaining</p>
-              <p className={`font-mono text-base font-semibold ${
-                sessionRemainingSec === null
-                  ? 'text-gray-300'
-                  : sessionRemainingSec <= 60
-                  ? 'text-red-300'
-                  : sessionRemainingSec <= 5 * 60
-                  ? 'text-yellow-300'
-                  : 'text-blue-300'
-              }`}>
-                {sessionRemainingSec === null ? 'Waiting for host timer…' : formatDuration(sessionRemainingSec)}
-              </p>
-              <p className="text-[10px] text-gray-500">
-                Session limit: {Math.floor(sessionLimitMs / 60000)} min
-              </p>
-            </div>
-          </div>
-        )}
-        {status === 'connecting' && (
-          <div className="mb-6">
-            {!iceReady ? (
-              <div className="space-y-2">
-                <SkeletonBox height="h-6" width="w-32" />
-                <p className="text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
+          {status !== 'connecting' && (
+            <div className="mb-6">
+              <p className={`text-lg font-semibold ${s.color}`}>{s.label}</p>
+              <p className="mt-1 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
+              {roomCapacity && (
+                <p className="mt-1 text-xs text-gray-400">Listeners: {roomCapacity.listenerCount}/{roomCapacity.maxListeners}</p>
+              )}
+              <div className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-gray-500">Session Remaining</p>
+                <p className={`font-mono text-base font-semibold ${sessionRemainingSec === null
+                    ? 'text-gray-300'
+                    : sessionRemainingSec <= 60
+                      ? 'text-red-300'
+                      : sessionRemainingSec <= 5 * 60
+                        ? 'text-yellow-300'
+                        : 'text-blue-300'
+                  }`}>
+                  {sessionRemainingSec === null ? 'Waiting for host timer…' : formatDuration(sessionRemainingSec)}
+                </p>
+                <p className="text-[10px] text-gray-500">
+                  Session limit: {Math.floor(sessionLimitMs / 60000)} min
+                </p>
               </div>
-            ) : (
-              <p className="text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
-            )}
-          </div>
-        )}
-
-        {/* ICE/TURN loading state */}
-        {!iceReady && (
-          <div className="mb-4 space-y-2">
-            <p className="text-xs uppercase tracking-wider text-gray-400 mb-2">Initializing…</p>
-            <SkeletonBox height="h-10" />
-          </div>
-        )}
-
-        {/* Connection error state */}
-        {connError && !isRetrying && (
-          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3">
-            <div>
-              <p className="text-sm font-semibold text-red-300">⚠️ Connection Issue</p>
-              <p className="text-xs text-red-200 mt-1">{connError}</p>
             </div>
-            <button
-              onClick={handleRetry}
-              className="w-full rounded-lg bg-red-600/40 hover:bg-red-600/60 px-3 py-2 text-xs font-semibold text-red-100 transition"
-            >
-              Retry Connection
-            </button>
-          </div>
-        )}
-
-        {joinError && (
-          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3">
-            <div>
-              <p className="text-sm font-semibold text-red-300">Room is full</p>
-              <p className="text-xs text-red-200 mt-1">{joinError}</p>
+          )}
+          {status === 'connecting' && (
+            <div className="mb-6">
+              {!iceReady ? (
+                <div className="space-y-2">
+                  <SkeletonBox height="h-6" width="w-32" />
+                  <p className="text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
+              )}
             </div>
-            <ShimmerButton
-              onClick={() => navigate(`/join/${roomCode?.toUpperCase()}`, { replace: true })}
-              background="rgba(20, 20, 30, 0.95)"
-              shimmerColor="#5c7cfa"
-              className="dark:text-white w-full font-semibold"
-            >
-              Back to Join Page
-            </ShimmerButton>
-          </div>
-        )}
+          )}
 
-        {/* WebRTC connection state — shown while audio is not yet playing */}
-        {!audioPlaying && status !== 'ended' && iceReady && (
-          <div className={`mb-4 flex items-center justify-center gap-2 text-xs rounded-lg px-3 py-2 ${
-            connState === 'connected'
-              ? 'bg-green-900/40 text-green-300'
-              : connState === 'failed'
-              ? 'bg-red-900/40 text-red-300'
-              : connState === 'disconnected'
-              ? 'bg-yellow-900/40 text-yellow-300'
-              : 'bg-gray-800/60 text-gray-400'
-          }`}>
-            <span className={`h-2 w-2 rounded-full ${
-              connState === 'connected' ? 'bg-green-400' :
-              connState === 'failed' ? 'bg-red-400' :
-              connState === 'disconnected' ? 'bg-yellow-400' :
-              'bg-gray-500 animate-pulse'
-            }`} />
-            {connState === 'new' && 'Waiting for stream…'}
-            {connState === 'connecting' && 'Connecting audio path…'}
-            {connState === 'connected' && 'Audio path ready'}
-            {connState === 'disconnected' && 'Connection interrupted, retrying…'}
-            {connState === 'failed' && 'Connection failed — try reconnecting'}
-            {connState === 'closed' && 'Connection closed'}
-          </div>
-        )}
+          {/* ICE/TURN loading state */}
+          {!iceReady && (
+            <div className="mb-4 space-y-2">
+              <p className="text-xs uppercase tracking-wider text-gray-400 mb-2">Initializing…</p>
+              <SkeletonBox height="h-10" />
+            </div>
+          )}
 
-        {/* Hidden audio element — playback triggered by user tap, not autoplay.
+          {/* Connection error state */}
+          {connError && !isRetrying && (
+            <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-red-300">⚠️ Connection Issue</p>
+                <p className="text-xs text-red-200 mt-1">{connError}</p>
+              </div>
+              <button
+                onClick={handleRetry}
+                className="w-full rounded-lg bg-red-600/40 hover:bg-red-600/60 px-3 py-2 text-xs font-semibold text-red-100 transition"
+              >
+                Retry Connection
+              </button>
+            </div>
+          )}
+
+          {joinError && (
+            <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-red-300">Room is full</p>
+                <p className="text-xs text-red-200 mt-1">{joinError}</p>
+              </div>
+              <ShimmerButton
+                onClick={() => navigate(`/join/${roomCode?.toUpperCase()}`, { replace: true })}
+                background="rgba(20, 20, 30, 0.95)"
+                shimmerColor="#5c7cfa"
+                className="dark:text-white w-full font-semibold"
+              >
+                Back to Join Page
+              </ShimmerButton>
+            </div>
+          )}
+
+          {/* WebRTC connection state — shown while audio is not yet playing */}
+          {!audioPlaying && status !== 'ended' && iceReady && (
+            <div className={`mb-4 flex items-center justify-center gap-2 text-xs rounded-lg px-3 py-2 ${connState === 'connected'
+                ? 'bg-green-900/40 text-green-300'
+                : connState === 'failed'
+                  ? 'bg-red-900/40 text-red-300'
+                  : connState === 'disconnected'
+                    ? 'bg-yellow-900/40 text-yellow-300'
+                    : 'bg-gray-800/60 text-gray-400'
+              }`}>
+              <span className={`h-2 w-2 rounded-full ${connState === 'connected' ? 'bg-green-400' :
+                  connState === 'failed' ? 'bg-red-400' :
+                    connState === 'disconnected' ? 'bg-yellow-400' :
+                      'bg-gray-500 animate-pulse'
+                }`} />
+              {connState === 'new' && 'Waiting for stream…'}
+              {connState === 'connecting' && 'Connecting audio path…'}
+              {connState === 'connected' && 'Audio path ready'}
+              {connState === 'disconnected' && 'Connection interrupted, retrying…'}
+              {connState === 'failed' && 'Connection failed — try reconnecting'}
+              {connState === 'closed' && 'Connection closed'}
+            </div>
+          )}
+
+          {/* Hidden audio element — playback triggered by user tap, not autoplay.
             Do NOT set the HTML muted attribute here — some mobile browsers
             (especially iOS Safari) treat a muted HTML attribute as sticky and
             refuse to unmute via JS.  The element starts silent because it has
             no srcObject; handleStartAudio() calls play() inside a user gesture. */}
-        <audio ref={setAudioEl} playsInline />
+          <audio ref={setAudioEl} playsInline />
 
-        {/* Shown as soon as the remote stream arrives.
+          {/* Shown as soon as the remote stream arrives.
             Must be a real tap/click so mobile browsers allow audio.play(). */}
-        {audioReady && !audioPlaying && (
-          <ShimmerButton
-            onClick={handleStartAudio}
-            background="rgba(76, 110, 245, 1)"
-            shimmerColor="#ffffff"
-            className={`dark:text-white mb-6 w-full font-semibold ${isMobile ? 'py-4 text-xl' : 'py-3 text-lg'}`}
-          >
-            Tap to Hear
-          </ShimmerButton>
-        )}
+          {audioReady && !audioPlaying && (
+            <ShimmerButton
+              onClick={handleStartAudio}
+              background="rgba(76, 110, 245, 1)"
+              shimmerColor="#ffffff"
+              className={`dark:text-white mb-6 w-full font-semibold ${isMobile ? 'py-4 text-xl' : 'py-3 text-lg'}`}
+            >
+              Tap to Hear
+            </ShimmerButton>
+          )}
 
-        {/* Loading state while waiting for audio to be ready */}
-        {!audioReady && !audioPlaying && iceReady && status === 'listening' && (
-          <div className={`mb-6 ${isMobile ? 'h-14' : 'h-10'}`}>
-            <SkeletonButton />
-          </div>
-        )}
-
-        {/* Volume — only shown once playback has actually started */}
-        {audioPlaying && status !== 'ended' && (
-          <div className={`mb-6 ${isMobile ? 'space-y-3' : 'space-y-2'}`}>
-            <label className={`block text-gray-400 ${isMobile ? 'text-base' : 'text-sm'}`}>Volume</label>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={volume}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                setVolume(v);
-                controller.setVolume(v);
-              }}
-              className={`w-full accent-brand-500 ${isMobile ? 'h-2' : 'h-1'}`}
-              style={{ WebkitAppearance: 'slider-horizontal' }}
-            />
-            <p className={`text-gray-500 ${isMobile ? 'text-sm' : 'text-xs'}`}>{Math.round(volume * 100)}%</p>
-          </div>
-        )}
-
-        {/* Sync indicator */}
-        {audioPlaying && status === 'listening' && (
-          <div className="mb-4 flex items-center justify-center gap-2 text-xs text-green-400">
-            <span className="h-2 w-2 rounded-full bg-green-500" />
-            Connected
-          </div>
-        )}
-
-        {/* Actions */}
-        {status !== 'ended' && (
-          <div className={`mb-4 rounded-xl border border-white/10 bg-white/5 ${isMobile ? 'p-4' : 'p-3'}`}>
-            <p className={`mb-4 uppercase tracking-wider text-gray-400 ${isMobile ? 'text-sm' : 'text-xs'}`}>React to host</p>
-
-            <div className={`flex flex-wrap items-center justify-center ${isMobile ? 'gap-3' : 'gap-2'}`}>
-              {QUICK_REACTIONS.map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  onClick={() => sendReaction(emoji)}
-                  className={`rounded-lg border transition ${
-                    selectedReaction === emoji
-                      ? 'border-brand-400 bg-brand-500/20'
-                      : 'border-white/10 bg-black/20 hover:bg-white/10'
-                  } ${isMobile ? 'px-4 py-3 text-2xl' : 'px-3 py-1.5 text-lg'}`}
-                  style={{ touchAction: 'manipulation' }}
-                  aria-label={`React with ${emoji}`}
-                >
-                  {emoji}
-                </button>
-              ))}
-
-              <button
-                type="button"
-                onClick={() => setShowExtraReactions((v) => !v)}
-                className={`rounded-lg border border-white/10 bg-black/20 font-semibold text-gray-200 transition hover:bg-white/10 ${
-                  isMobile ? 'px-4 py-3 text-lg' : 'px-3 py-1.5 text-sm'
-                }`}
-                style={{ touchAction: 'manipulation' }}
-                aria-label="More reactions"
-              >
-                +
-              </button>
+          {/* Loading state while waiting for audio to be ready */}
+          {!audioReady && !audioPlaying && iceReady && status === 'listening' && (
+            <div className={`mb-6 ${isMobile ? 'h-14' : 'h-10'}`}>
+              <SkeletonButton />
             </div>
+          )}
 
-            {showExtraReactions && (
-              <div className={`border-t border-white/10 pt-3 mt-3 flex flex-wrap items-center justify-center ${isMobile ? 'gap-3' : 'gap-2'}`}>
-                {EXTRA_REACTIONS.map((emoji) => (
+          {/* Volume — only shown once playback has actually started */}
+          {audioPlaying && status !== 'ended' && (
+            <div className={`mb-6 ${isMobile ? 'space-y-3' : 'space-y-2'}`}>
+              <label className={`block text-gray-400 ${isMobile ? 'text-base' : 'text-sm'}`}>Volume</label>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={volume}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  setVolume(v);
+                  controller.setVolume(v);
+                }}
+                className={`w-full accent-brand-500 ${isMobile ? 'h-2' : 'h-1'}`}
+                style={{ WebkitAppearance: 'slider-horizontal' }}
+              />
+              <p className={`text-gray-500 ${isMobile ? 'text-sm' : 'text-xs'}`}>{Math.round(volume * 100)}%</p>
+            </div>
+          )}
+
+          {/* Sync indicator */}
+          {audioPlaying && status === 'listening' && (
+            <div className="mb-4 flex items-center justify-center gap-2 text-xs text-green-400">
+              <span className="h-2 w-2 rounded-full bg-green-500" />
+              Connected
+            </div>
+          )}
+
+          {/* Actions */}
+          {status !== 'ended' && (
+            <div className={`mb-4 rounded-xl border border-white/10 bg-white/5 ${isMobile ? 'p-4' : 'p-3'}`}>
+              <p className={`mb-4 uppercase tracking-wider text-gray-400 ${isMobile ? 'text-sm' : 'text-xs'}`}>React to host</p>
+
+              <div className={`flex flex-wrap items-center justify-center ${isMobile ? 'gap-3' : 'gap-2'}`}>
+                {QUICK_REACTIONS.map((emoji) => (
                   <button
                     key={emoji}
                     type="button"
                     onClick={() => sendReaction(emoji)}
-                    className={`rounded-lg border transition ${
-                      selectedReaction === emoji
+                    className={`rounded-lg border transition ${selectedReaction === emoji
                         ? 'border-brand-400 bg-brand-500/20'
                         : 'border-white/10 bg-black/20 hover:bg-white/10'
-                    } ${isMobile ? 'px-4 py-3 text-2xl' : 'px-3 py-1.5 text-lg'}`}
+                      } ${isMobile ? 'px-4 py-3 text-2xl' : 'px-3 py-1.5 text-lg'}`}
                     style={{ touchAction: 'manipulation' }}
                     aria-label={`React with ${emoji}`}
                   >
                     {emoji}
                   </button>
                 ))}
+
+                <button
+                  type="button"
+                  onClick={() => setShowExtraReactions((v) => !v)}
+                  className={`rounded-lg border border-white/10 bg-black/20 font-semibold text-gray-200 transition hover:bg-white/10 ${isMobile ? 'px-4 py-3 text-lg' : 'px-3 py-1.5 text-sm'
+                    }`}
+                  style={{ touchAction: 'manipulation' }}
+                  aria-label="More reactions"
+                >
+                  +
+                </button>
               </div>
-            )}
 
-            {selectedReaction && (
-              <p className={`mt-3 text-gray-400 ${isMobile ? 'text-sm' : 'text-xs'}`}>
-                Your current reaction: <span className={isMobile ? 'text-2xl' : 'text-base'}>{selectedReaction}</span>
-              </p>
-            )}
-          </div>
-        )}
-
-        {status !== 'ended' && (
-          <div className={`mb-4 rounded-xl border border-white/10 bg-white/5 ${isMobile ? 'p-4' : 'p-3'}`}>
-            <button 
-              type="button" 
-              onClick={() => setShowChat((v) => !v)} 
-              className={`w-full text-left uppercase tracking-wider text-gray-400 hover:text-gray-300 transition font-semibold ${
-                isMobile ? 'text-sm py-2' : 'text-xs py-1'
-              }`}
-            >
-              {showChat ? '▼ Message Host' : '▶ Message Host'}
-            </button>
-            {showChat && (
-              <div className={`mt-3 space-y-2 ${isMobile ? 'space-y-3' : 'space-y-2'}`}>
-                <div className={`flex gap-2 ${isMobile ? 'flex-col' : ''}`}>
-                  <input 
-                    type="text" 
-                    value={chatMessage} 
-                    onChange={(e) => setChatMessage(e.target.value.slice(0, 50))} 
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} 
-                    placeholder="Say something..." 
-                    className={`rounded-lg border border-white/20 bg-black/40 text-white placeholder-gray-500 focus:outline-none focus:border-brand-400 ${
-                      isMobile 
-                        ? 'px-4 py-3 text-base flex-1' 
-                        : 'px-3 py-2 text-xs'
-                    }` } 
-                    maxLength="50" 
-                  />
-                  <button 
-                    type="button" 
-                    onClick={sendMessage} 
-                    disabled={!chatMessage.trim()} 
-                    className={`rounded-lg bg-brand-500/80 font-semibold text-white transition hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed ${
-                      isMobile 
-                        ? 'px-4 py-3 text-base' 
-                        : 'px-3 py-2 text-xs'
-                    }` }
-                  >
-                    Send
-                  </button>
+              {showExtraReactions && (
+                <div className={`border-t border-white/10 pt-3 mt-3 flex flex-wrap items-center justify-center ${isMobile ? 'gap-3' : 'gap-2'}`}>
+                  {EXTRA_REACTIONS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => sendReaction(emoji)}
+                      className={`rounded-lg border transition ${selectedReaction === emoji
+                          ? 'border-brand-400 bg-brand-500/20'
+                          : 'border-white/10 bg-black/20 hover:bg-white/10'
+                        } ${isMobile ? 'px-4 py-3 text-2xl' : 'px-3 py-1.5 text-lg'}`}
+                      style={{ touchAction: 'manipulation' }}
+                      aria-label={`React with ${emoji}`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
                 </div>
-                <p className={`text-gray-500 ${isMobile ? 'text-sm' : 'text-xs'}`}>{chatMessage.length}/50</p>
-              </div>
+              )}
+
+              {selectedReaction && (
+                <p className={`mt-3 text-gray-400 ${isMobile ? 'text-sm' : 'text-xs'}`}>
+                  Your current reaction: <span className={isMobile ? 'text-2xl' : 'text-base'}>{selectedReaction}</span>
+                </p>
+              )}
+            </div>
+          )}
+
+          {status !== 'ended' && (
+            <div className={`mb-4 rounded-xl border border-white/10 bg-white/5 ${isMobile ? 'p-4' : 'p-3'}`}>
+              <button
+                type="button"
+                onClick={() => setShowChat((v) => !v)}
+                className={`w-full text-left uppercase tracking-wider text-gray-400 hover:text-gray-300 transition font-semibold ${isMobile ? 'text-sm py-2' : 'text-xs py-1'
+                  }`}
+              >
+                {showChat ? '▼ Message Host' : '▶ Message Host'}
+              </button>
+              {showChat && (
+                <div className={`mt-3 space-y-2 ${isMobile ? 'space-y-3' : 'space-y-2'}`}>
+                  <div className={`flex gap-2 ${isMobile ? 'flex-col' : ''}`}>
+                    <input
+                      type="text"
+                      value={chatMessage}
+                      onChange={(e) => setChatMessage(e.target.value.slice(0, 50))}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                      placeholder="Say something..."
+                      className={`rounded-lg border border-white/20 bg-black/40 text-white placeholder-gray-500 focus:outline-none focus:border-brand-400 ${isMobile
+                          ? 'px-4 py-3 text-base flex-1'
+                          : 'px-3 py-2 text-xs'
+                        }`}
+                      maxLength="50"
+                    />
+                    <button
+                      type="button"
+                      onClick={sendMessage}
+                      disabled={!chatMessage.trim()}
+                      className={`rounded-lg bg-brand-500/80 font-semibold text-white transition hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed ${isMobile
+                          ? 'px-4 py-3 text-base'
+                          : 'px-3 py-2 text-xs'
+                        }`}
+                    >
+                      Send
+                    </button>
+                  </div>
+                  <p className={`text-gray-500 ${isMobile ? 'text-sm' : 'text-xs'}`}>{chatMessage.length}/50</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3">
+            {status === 'ended' ? (
+              <ShimmerButton
+                onClick={() => navigate('/', { replace: true })}
+                background="rgba(76, 110, 245, 1)"
+                shimmerColor="#ffffff"
+                className={`dark:text-white w-full font-semibold ${isMobile ? 'py-4 text-lg' : 'py-3 text-base'}`}
+              >
+                Back to Home
+              </ShimmerButton>
+            ) : (
+              <ShimmerButton
+                onClick={handleLeave}
+                background="rgba(20, 20, 30, 0.95)"
+                shimmerColor="#5c7cfa"
+                className={`dark:text-white w-full font-semibold ${isMobile ? 'py-4 text-lg' : 'py-3 text-base'}`}
+              >
+                Leave Room
+              </ShimmerButton>
             )}
           </div>
-        )}
-
-        <div className="flex flex-col gap-3">
-          {status === 'ended' ? (
-            <ShimmerButton
-              onClick={() => navigate('/', { replace: true })}
-              background="rgba(76, 110, 245, 1)"
-              shimmerColor="#ffffff"
-              className={`dark:text-white w-full font-semibold ${isMobile ? 'py-4 text-lg' : 'py-3 text-base'}`}
-            >
-              Back to Home
-            </ShimmerButton>
-          ) : (
-            <ShimmerButton
-              onClick={handleLeave}
-              background="rgba(20, 20, 30, 0.95)"
-              shimmerColor="#5c7cfa"
-              className={`dark:text-white w-full font-semibold ${isMobile ? 'py-4 text-lg' : 'py-3 text-base'}`}
-            >
-              Leave Room
-            </ShimmerButton>
-          )}
-        </div>
         </div>
       </GlowCard>
     </div>

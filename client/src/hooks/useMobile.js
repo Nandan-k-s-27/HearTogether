@@ -7,13 +7,13 @@ import { debugLog, warnLog, errorLog } from '../lib/logger';
 export function isMobileDevice() {
   // Check viewport size
   if (typeof window === 'undefined') return false;
-  
+
   const isMobileViewport = window.matchMedia('(max-width: 768px)').matches;
-  
+
   // Check user agent as secondary indicator
   const ua = navigator.userAgent.toLowerCase();
   const isMobileAgent = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/.test(ua);
-  
+
   return isMobileViewport || isMobileAgent;
 }
 
@@ -26,7 +26,7 @@ export function useOrientationLock() {
 
   const lockPortrait = useCallback(async () => {
     if (!isMobileDevice()) return;
-    
+
     try {
       if (screen?.orientation?.lock) {
         await screen.orientation.lock('portrait-primary');
@@ -41,7 +41,7 @@ export function useOrientationLock() {
 
   const unlockOrientation = useCallback(async () => {
     if (!isMobileDevice()) return;
-    
+
     try {
       if (screen?.orientation?.unlock && isLockedRef.current) {
         screen.orientation.unlock();
@@ -68,11 +68,6 @@ export function useOrientationLock() {
 /**
  * Hook to manage WakeLock API — keeps screen awake during active listening.
  * Gracefully degrades on unsupported browsers.
- *
- * FIX: The visibilitychange listener is now properly tracked and cleaned up
- * on release/unmount to prevent listener leaks. The handler no longer nulls
- * out the wake lock ref on `document.hidden` — the OS auto-releases it, and
- * setting it null here would prevent proper re-acquire on foreground.
  */
 export function useWakeLock() {
   const wakeLockRef = useRef(null);
@@ -100,35 +95,24 @@ export function useWakeLock() {
       wakeLockRef.current = await navigator.wakeLock.request('screen');
       debugLog('[WakeLock] Screen wake lock acquired');
 
-      // Clean up any old listener before adding a new one
       removeVisibilityListener();
 
-      // Re-acquire when tab comes back to focus (wake lock is auto-released
-      // by the OS when the page is hidden)
+      // Re-acquire if tab comes back to focus (page visibility change)
       const handleVisibilityChange = async () => {
-        if (document.visibilityState === 'visible' && !wakeLockRef.current) {
+        if (document.hidden) {
+          wakeLockRef.current = null;
+        } else if (!wakeLockRef.current) {
           try {
             wakeLockRef.current = await navigator.wakeLock.request('screen');
             debugLog('[WakeLock] Re-acquired after visibility change');
           } catch (err) {
             errorLog('[WakeLock] Failed to re-acquire:', err);
           }
-        } else if (document.visibilityState === 'hidden') {
-          // The OS automatically releases the wake lock when hidden.
-          // Set ref to null so we re-acquire on return.
-          wakeLockRef.current = null;
         }
       };
 
       visibilityHandlerRef.current = handleVisibilityChange;
       document.addEventListener('visibilitychange', handleVisibilityChange);
-
-      // Also handle the wake lock being released by the OS spontaneously
-      wakeLockRef.current.addEventListener('release', () => {
-        debugLog('[WakeLock] Released by OS');
-        wakeLockRef.current = null;
-      });
-
       return true;
     } catch (err) {
       errorLog('[WakeLock] Failed to request wake lock:', err);
@@ -152,10 +136,10 @@ export function useWakeLock() {
 
   useEffect(() => {
     return () => {
-      // Cleanup: release on unmount
       removeVisibilityListener();
+      // Cleanup: release on unmount
       if (wakeLockRef.current) {
-        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current.release().catch(() => { });
       }
     };
   }, [removeVisibilityListener]);

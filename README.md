@@ -13,6 +13,8 @@ HearTogether is a real-time web audio sharing app. One user hosts audio, listene
 - Stable account controls: signed-in users always see account identity and direct Switch/Logout actions.
 - Hardened backend with CORS allowlist, helmet headers, rate limiting, and stale-room cleanup.
 - **Scalability**: Configurable listener limit (default 30; realistic for Render free tier) prevents WebRTC degradation.
+- **Android playback polish**: Listener audio uses a singleton playback controller with Media Session metadata/actions (play/pause/stop).
+- **Background playback support**: No visibility-based auto-stop for listener audio; wake lock/orientation and socket reconnection are tuned for mobile tab suspend/resume.
 
 ## Tech Stack
 
