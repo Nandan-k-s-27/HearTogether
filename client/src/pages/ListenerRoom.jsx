@@ -239,6 +239,30 @@ export default function ListenerRoom() {
     };
   }, [iceReady, roomCode, navigate, close, clearOfferRetryTimer, clearDisconnectRecoveryTimer, remoteStreamRef, controller]);
 
+  // Re-join room when socket recovers from a background disconnection.
+  // Android suspends WebSockets when backgrounded; when the socket reconnects
+  // (which now uses Infinity retries), we need to re-establish room membership
+  // and get a fresh WebRTC offer.
+  useEffect(() => {
+    const onReconnect = () => {
+      debugLog('[ListenerRoom] socket reconnected, re-joining room');
+      socket.emit('listener:join', { roomCode }, (res) => {
+        if (res?.error) {
+          warnLog('[ListenerRoom] rejoin after reconnect failed:', res.error);
+          return;
+        }
+        joinedRoomIdRef.current = res.roomId;
+        setStatus('listening');
+        debugLog('[ListenerRoom] re-joined room after reconnect, requesting fresh offer');
+        // Request a fresh offer to re-establish the WebRTC peer connection
+        socket.emit('listener:request-offer', { roomId: res.roomId });
+      });
+    };
+
+    socket.io.on('reconnect', onReconnect);
+    return () => socket.io.off('reconnect', onReconnect);
+  }, [roomCode]);
+
   // Keep Render awake: ping /api/health every 8 minutes.
   useEffect(() => {
     const id = setInterval(pingServer, 8 * 60 * 1000);

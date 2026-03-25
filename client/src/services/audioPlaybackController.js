@@ -17,9 +17,11 @@ class AudioPlaybackController {
     this.subscribers = new Set();
     this.hasUserActivatedPlayback = false;
     this.metadata = DEFAULT_METADATA;
+    this.keepAliveInterval = null;
     this.boundAudioEventHandler = () => this.syncState();
     this.boundPageRestoreHandler = () => this.syncState();
     this.boundPageUnloadHandler = () => this.handlePageUnload();
+    this.boundVisibilityHandler = () => this.handleVisibilityChange();
 
     this.state = {
       isReady: false,
@@ -36,11 +38,8 @@ class AudioPlaybackController {
     // apps or locking the screen, which breaks background playback.
     window.addEventListener('beforeunload', this.boundPageUnloadHandler);
     window.addEventListener('unload', this.boundPageUnloadHandler);
+    document.addEventListener('visibilitychange', this.boundVisibilityHandler);
 
-    // Initial Media Session registration — primarily registers action handlers.
-    // Metadata + full binding is refreshed inside attachAudioElement() once the
-    // <audio> element is available, which is when Android Chrome actually
-    // activates the media notification.
     this.setupMediaSession();
   }
 
@@ -49,9 +48,9 @@ class AudioPlaybackController {
 
     this.applyMediaMetadata(this.metadata);
 
-    // FIX: Re-attach the current stream before playing so the lock-screen
-    // "Play" button always has a valid srcObject, even after ICE renegotiation.
     this.setMediaSessionActionHandler('play', async () => {
+      // Re-attach the current stream before playing so the lock-screen
+      // "Play" button always has a valid srcObject.
       if (this.audioEl && this.currentStream && this.audioEl.srcObject !== this.currentStream) {
         this.audioEl.srcObject = this.currentStream;
         this.audioEl.muted = false;
@@ -73,7 +72,6 @@ class AudioPlaybackController {
     try {
       navigator.mediaSession.setActionHandler(action, handler);
     } catch (err) {
-      // Some actions are unsupported on older/mobile browser builds.
       debugLog(`[AudioPlaybackController] media action '${action}' unsupported`, err?.message || err);
     }
   }
@@ -97,14 +95,14 @@ class AudioPlaybackController {
   }
 
   addAudioEventListeners(el) {
-    const events = ['play', 'pause', 'ended', 'volumechange', 'waiting', 'canplay', 'error'];
+    const events = ['play', 'pause', 'playing', 'ended', 'volumechange', 'waiting', 'canplay', 'error'];
     events.forEach((eventName) => {
       el.addEventListener(eventName, this.boundAudioEventHandler);
     });
   }
 
   removeAudioEventListeners(el) {
-    const events = ['play', 'pause', 'ended', 'volumechange', 'waiting', 'canplay', 'error'];
+    const events = ['play', 'pause', 'playing', 'ended', 'volumechange', 'waiting', 'canplay', 'error'];
     events.forEach((eventName) => {
       el.removeEventListener(eventName, this.boundAudioEventHandler);
     });
@@ -131,11 +129,8 @@ class AudioPlaybackController {
       this.audioEl.srcObject = this.currentStream;
     }
 
-    // FIX: Re-apply Media Session metadata and action handlers now that an
-    // <audio> element is mounted. Android Chrome only activates the media
-    // notification when a real <audio> element is attached to the page.
+    // Re-apply Media Session now that a real <audio> element is present.
     this.setupMediaSession();
-
     this.syncState();
   }
 
@@ -166,14 +161,13 @@ class AudioPlaybackController {
       await this.audioEl.play();
       this.hasUserActivatedPlayback = true;
 
-      // FIX: Force-push metadata and 'playing' state immediately after the
-      // play() promise resolves. This is the moment Android Chrome locks in
-      // the notification card — doing it here (not in syncState) guarantees
-      // the OS receives the signal while the browser is in a trusted context.
+      // Force-push metadata and 'playing' state immediately after the
+      // play() promise resolves to cement the Android notification card.
       this.applyMediaMetadata(this.metadata);
       this.updateMediaSessionPlaybackState('playing');
 
       this.syncState();
+      this.startKeepAlive();
       return true;
     } catch (err) {
       errorLog('[AudioPlaybackController] play() failed', err?.name, err?.message || err);
@@ -189,6 +183,8 @@ class AudioPlaybackController {
   }
 
   stop() {
+    this.stopKeepAlive();
+
     if (this.audioEl) {
       this.audioEl.pause();
       this.audioEl.srcObject = null;
@@ -216,6 +212,65 @@ class AudioPlaybackController {
     this.updateState({ volume: normalized });
   }
 
+  // Keepalive: periodically checks if the browser paused the audio (common
+  // on Android background) and resumes it. Also re-pushes Media Session
+  // metadata so the notification stays alive.
+  startKeepAlive() {
+    this.stopKeepAlive();
+    this.keepAliveInterval = setInterval(() => {
+      if (!this.audioEl || !this.currentStream || !this.hasUserActivatedPlayback) return;
+
+      // Ensure srcObject is still attached (can be cleared by browser GC)
+      if (!this.audioEl.srcObject && this.currentStream) {
+        debugLog('[AudioPlaybackController] keepalive: re-attaching stream');
+        this.audioEl.srcObject = this.currentStream;
+      }
+
+      // If browser paused us in background, try to resume
+      if (this.audioEl.paused && this.currentStream) {
+        debugLog('[AudioPlaybackController] keepalive: audio was paused, resuming');
+        this.audioEl.play().then(() => {
+          this.applyMediaMetadata(this.metadata);
+          this.updateMediaSessionPlaybackState('playing');
+        }).catch((err) => {
+          debugLog('[AudioPlaybackController] keepalive resume failed:', err?.message);
+        });
+      }
+
+      // Re-push metadata to keep the notification alive
+      if (!this.audioEl.paused) {
+        this.updateMediaSessionPlaybackState('playing');
+      }
+    }, 10000);
+  }
+
+  stopKeepAlive() {
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = null;
+    }
+  }
+
+  handleVisibilityChange() {
+    if (document.visibilityState === 'visible') {
+      // Returned to foreground — re-cement the notification and sync state
+      if (this.hasUserActivatedPlayback && this.audioEl) {
+        this.applyMediaMetadata(this.metadata);
+        this.syncState();
+
+        // If the browser paused audio while backgrounded, resume it
+        if (this.audioEl.paused && this.currentStream) {
+          debugLog('[AudioPlaybackController] visibility: audio was paused, resuming');
+          this.audioEl.play().then(() => {
+            this.updateMediaSessionPlaybackState('playing');
+          }).catch(() => {});
+        }
+      }
+    }
+    // IMPORTANT: Do nothing on 'hidden' — we must NOT pause/stop audio on
+    // visibility change. Let the audio continue playing in the background.
+  }
+
   syncState() {
     if (!this.audioEl) return;
 
@@ -231,19 +286,13 @@ class AudioPlaybackController {
 
     this.updateState(nextState);
 
-    // FIX: Only communicate a non-'none' playback state to the OS after the
-    // user has activated playback at least once. Sending 'paused' before any
-    // user gesture causes Android to show a broken notification with no
-    // controls, which it then dismisses — preventing the notification from
-    // appearing at all when actual playback starts.
+    // Only push playback state after user has tapped play at least once.
     if (this.hasUserActivatedPlayback) {
       this.updateMediaSessionPlaybackState(isPlaying ? 'playing' : 'paused');
     }
   }
 
   handlePageUnload() {
-    // If the browser tab is closed or the process is being torn down,
-    // release playback resources so no stale element survives remounts.
     this.stop();
   }
 
