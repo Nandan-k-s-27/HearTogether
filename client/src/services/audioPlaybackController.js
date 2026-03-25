@@ -37,6 +37,10 @@ class AudioPlaybackController {
     window.addEventListener('beforeunload', this.boundPageUnloadHandler);
     window.addEventListener('unload', this.boundPageUnloadHandler);
 
+    // Initial Media Session registration — primarily registers action handlers.
+    // Metadata + full binding is refreshed inside attachAudioElement() once the
+    // <audio> element is available, which is when Android Chrome actually
+    // activates the media notification.
     this.setupMediaSession();
   }
 
@@ -44,12 +48,21 @@ class AudioPlaybackController {
     if (!('mediaSession' in navigator)) return;
 
     this.applyMediaMetadata(this.metadata);
+
+    // FIX: Re-attach the current stream before playing so the lock-screen
+    // "Play" button always has a valid srcObject, even after ICE renegotiation.
     this.setMediaSessionActionHandler('play', async () => {
+      if (this.audioEl && this.currentStream && this.audioEl.srcObject !== this.currentStream) {
+        this.audioEl.srcObject = this.currentStream;
+        this.audioEl.muted = false;
+      }
       await this.play();
     });
+
     this.setMediaSessionActionHandler('pause', () => {
       this.pause();
     });
+
     this.setMediaSessionActionHandler('stop', () => {
       this.stop();
     });
@@ -118,6 +131,11 @@ class AudioPlaybackController {
       this.audioEl.srcObject = this.currentStream;
     }
 
+    // FIX: Re-apply Media Session metadata and action handlers now that an
+    // <audio> element is mounted. Android Chrome only activates the media
+    // notification when a real <audio> element is attached to the page.
+    this.setupMediaSession();
+
     this.syncState();
   }
 
@@ -147,6 +165,14 @@ class AudioPlaybackController {
     try {
       await this.audioEl.play();
       this.hasUserActivatedPlayback = true;
+
+      // FIX: Force-push metadata and 'playing' state immediately after the
+      // play() promise resolves. This is the moment Android Chrome locks in
+      // the notification card — doing it here (not in syncState) guarantees
+      // the OS receives the signal while the browser is in a trusted context.
+      this.applyMediaMetadata(this.metadata);
+      this.updateMediaSessionPlaybackState('playing');
+
       this.syncState();
       return true;
     } catch (err) {
@@ -171,6 +197,7 @@ class AudioPlaybackController {
     }
 
     this.currentStream = null;
+    this.hasUserActivatedPlayback = false;
     this.updateState({
       isReady: false,
       isPlaying: false,
@@ -192,9 +219,10 @@ class AudioPlaybackController {
   syncState() {
     if (!this.audioEl) return;
 
+    const isPlaying = !this.audioEl.paused && !this.audioEl.ended;
     const nextState = {
       isReady: Boolean(this.audioEl.srcObject || this.currentStream),
-      isPlaying: !this.audioEl.paused && !this.audioEl.ended,
+      isPlaying,
       volume: this.audioEl.volume,
       muted: this.audioEl.muted,
       ended: this.audioEl.ended,
@@ -202,7 +230,15 @@ class AudioPlaybackController {
     };
 
     this.updateState(nextState);
-    this.updateMediaSessionPlaybackState(nextState.isPlaying ? 'playing' : 'paused');
+
+    // FIX: Only communicate a non-'none' playback state to the OS after the
+    // user has activated playback at least once. Sending 'paused' before any
+    // user gesture causes Android to show a broken notification with no
+    // controls, which it then dismisses — preventing the notification from
+    // appearing at all when actual playback starts.
+    if (this.hasUserActivatedPlayback) {
+      this.updateMediaSessionPlaybackState(isPlaying ? 'playing' : 'paused');
+    }
   }
 
   handlePageUnload() {

@@ -284,6 +284,8 @@ export default function ListenerRoom() {
       clearOfferRetryTimer();
       controller.stop();
       close();
+      releaseWakeLock();
+      unlockOrientation();
     };
     const onRemoved = () => {
       debugLog(`[ListenerRoom] removed by host`);
@@ -291,6 +293,8 @@ export default function ListenerRoom() {
       clearOfferRetryTimer();
       controller.stop();
       close();
+      releaseWakeLock();
+      unlockOrientation();
     };
 
     const onSyncTimestamp = ({ sessionStartedAt, sessionLimitMs: syncedLimitMs }) => {
@@ -321,7 +325,7 @@ export default function ListenerRoom() {
       socket.off('host:removed', onRemoved);
       socket.off('sync:timestamp', onSyncTimestamp);
     };
-  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer, controller, sessionLimitMs]);
+  }, [handleOffer, handleIceCandidate, close, clearOfferRetryTimer, controller, sessionLimitMs, releaseWakeLock, unlockOrientation]);
 
   // Monitor connection state for errors
   useEffect(() => {
@@ -349,20 +353,16 @@ export default function ListenerRoom() {
     }
   }, [connState, clearDisconnectRecoveryTimer]);
 
-  // Mobile: Lock orientation and manage screen wake lock during listening
+  // Mobile: Lock orientation and acquire wake lock when audio starts playing.
+  // We intentionally do NOT release the wake lock here when audioPlaying flips
+  // to false — that can happen transiently during ICE renegotiation and should
+  // not wake-kill the screen.  Release is handled explicitly in handleLeave,
+  // onStopped, and onRemoved below.
   useEffect(() => {
-    if (!audioPlaying) {
-      releaseWakeLock();
-      unlockOrientation();
-      return;
-    }
-
-    // When audio starts playing on mobile, lock to portrait and request wake lock
-    if (isMobile) {
-      lockPortrait();
-      requestWakeLock();
-    }
-  }, [audioPlaying, isMobile, lockPortrait, unlockOrientation, requestWakeLock, releaseWakeLock]);
+    if (!audioPlaying || !isMobile) return;
+    lockPortrait();
+    requestWakeLock();
+  }, [audioPlaying, isMobile, lockPortrait, requestWakeLock]);
 
   const handleLeave = () => {
     clearOfferRetryTimer();
@@ -370,6 +370,8 @@ export default function ListenerRoom() {
     controller.stop();
     close();
     socket.disconnect();
+    releaseWakeLock();
+    unlockOrientation();
     // replace: true removes this room URL from history so pressing the device
     // back button from home does not land back here and attempt reconnect.
     navigate('/', { replace: true });
