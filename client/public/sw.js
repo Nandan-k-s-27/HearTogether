@@ -18,7 +18,5 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Keep network behavior unchanged for realtime audio signaling and API calls.
-self.addEventListener('fetch', () => {
-  // Intentionally no custom caching strategy.
-});
+// No fetch handler is registered because the app does not currently implement
+// custom runtime caching strategies.

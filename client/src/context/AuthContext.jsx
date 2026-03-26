@@ -144,12 +144,12 @@ export function AuthProvider({ children }) {
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const probeBackendHealth = async () => {
+  const probeEndpoint = async (path) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
 
     try {
-      const health = await fetch(`${BACKEND_URL}/api/health?t=${Date.now()}`, {
+      const response = await fetch(`${BACKEND_URL}${path}${path.includes('?') ? '&' : '?'}t=${Date.now()}`, {
         method: 'GET',
         cache: 'no-store',
         mode: 'cors',
@@ -157,13 +157,16 @@ export function AuthProvider({ children }) {
         signal: controller.signal,
       });
 
-      return health.ok;
+      return response.ok;
     } catch {
       return false;
     } finally {
       clearTimeout(timeout);
     }
   };
+
+  const probeBackendHealth = () => probeEndpoint('/api/health');
+  const probeAuthStatus = () => probeEndpoint('/auth/status');
 
   const resetAuthState = () => {
     localStorage.removeItem('auth_token');
@@ -177,7 +180,7 @@ export function AuthProvider({ children }) {
   };
 
   const waitForBackend = async () => {
-    const timeoutMs = 75_000;
+    const timeoutMs = 150_000;
     const intervalMs = 2_500;
     const startedAt = Date.now();
     let attempt = 0;
@@ -196,8 +199,8 @@ export function AuthProvider({ children }) {
             : 'Finalizing warm-up... this can take a moment on Render.',
       });
 
-      const healthy = await probeBackendHealth();
-      if (healthy) {
+      const [healthy, authReady] = await Promise.all([probeBackendHealth(), probeAuthStatus()]);
+      if (healthy && authReady) {
         return true;
       }
 
@@ -220,12 +223,21 @@ export function AuthProvider({ children }) {
 
     const ready = await waitForBackend();
 
+    if (!ready) {
+      sessionStorage.removeItem(AUTH_IN_FLIGHT_KEY);
+      setAuthBootState({
+        active: false,
+        attempt: 0,
+        message: '',
+      });
+      setError('Authentication service is still waking up. Please try again in a few moments.');
+      return;
+    }
+
     setAuthBootState((prev) => ({
       ...prev,
       active: true,
-      message: ready
-        ? 'Backend ready. Redirecting to Google...'
-        : 'Still waking up. Redirecting now...',
+      message: 'Backend ready. Redirecting to Google...',
     }));
 
     await sleep(450);
