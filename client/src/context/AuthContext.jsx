@@ -144,6 +144,27 @@ export function AuthProvider({ children }) {
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  const probeBackendHealth = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+
+    try {
+      const health = await fetch(`${BACKEND_URL}/api/health?t=${Date.now()}`, {
+        method: 'GET',
+        cache: 'no-store',
+        mode: 'cors',
+        credentials: 'omit',
+        signal: controller.signal,
+      });
+
+      return health.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
   const resetAuthState = () => {
     localStorage.removeItem('auth_token');
     sessionStorage.removeItem(AUTH_IN_FLIGHT_KEY);
@@ -175,19 +196,9 @@ export function AuthProvider({ children }) {
             : 'Finalizing warm-up... this can take a moment on Render.',
       });
 
-      try {
-        const health = await fetch(`${BACKEND_URL}/api/health?t=${Date.now()}`, {
-          method: 'GET',
-          cache: 'no-store',
-          mode: 'cors',
-          credentials: 'omit',
-        });
-
-        if (health.ok) {
-          return true;
-        }
-      } catch {
-        // Ignore warm-up probe failures while service is starting.
+      const healthy = await probeBackendHealth();
+      if (healthy) {
+        return true;
       }
 
       await sleep(intervalMs);
