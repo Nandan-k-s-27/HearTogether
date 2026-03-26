@@ -44,10 +44,6 @@ const {
   getRecentSignals,
 } = require('./redis/realtime');
 
-const redisInitPromise = initRedis().catch((err) => {
-  console.warn('[redis] startup initialization failed, continuing without Redis', err?.message || err);
-});
-
 const app = express();
 const server = http.createServer(app);
 
@@ -789,29 +785,35 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3001;
 
-async function bootstrap() {
+async function initializeRedisFeatures() {
   try {
-    await redisInitPromise;
+    await initRedis();
 
-    if (isRedisReady()) {
-      const pub = getRedisPublisher();
-      const sub = getRedisSubscriber();
-      if (pub && sub) {
-        io.adapter(createAdapter(pub, sub));
-        console.log('[socket] Redis adapter enabled');
-      }
+    if (!isRedisReady()) return;
 
-      await subscribeEvent('room-events', async (event) => {
-        if (!event?.type) return;
-        if (event.roomId) {
-          const activeCount = await getActiveUserCount(event.roomId);
-          if (activeCount !== null) {
-            console.log(`[pubsub] ${event.type} room=${event.roomId} activeUsers=${activeCount}`);
-          }
-        }
-      });
+    const pub = getRedisPublisher();
+    const sub = getRedisSubscriber();
+    if (pub && sub) {
+      io.adapter(createAdapter(pub, sub));
+      console.log('[socket] Redis adapter enabled');
     }
 
+    await subscribeEvent('room-events', async (event) => {
+      if (!event?.type) return;
+      if (event.roomId) {
+        const activeCount = await getActiveUserCount(event.roomId);
+        if (activeCount !== null) {
+          console.log(`[pubsub] ${event.type} room=${event.roomId} activeUsers=${activeCount}`);
+        }
+      }
+    });
+  } catch (err) {
+    console.warn('[redis] background initialization failed, continuing without Redis', err?.message || err);
+  }
+}
+
+async function bootstrap() {
+  try {
     server.listen(PORT, () => {
       console.log(`HearTogether server listening on port ${PORT}`);
       if (hasTurn) console.log(`[TURN] provider: ${TURN_PROVIDER} OK`);
@@ -819,6 +821,9 @@ async function bootstrap() {
       console.log(`[lifecycle] max ${MAX_LISTENERS_PER_ROOM} listeners/room, ${MAX_TTL_MS / 1000 / 60} min inactivity TTL`);
       console.log(`[redis] status: ${isRedisReady() ? 'connected' : 'disabled/unavailable'}`);
     });
+
+    // Keep startup fast on platforms that expect an open port quickly (e.g. Render).
+    initializeRedisFeatures();
   } catch (err) {
     console.error('[bootstrap] failed to initialize backend', err?.message || err);
     process.exit(1);
