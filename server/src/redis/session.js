@@ -2,6 +2,19 @@ const session = require('express-session');
 const { RedisStore } = require('connect-redis');
 const { getRedisClient } = require('./client');
 
+function createEphemeralSessionMiddleware() {
+  return (req, _res, next) => {
+    // Keep compatibility with existing req.session references while avoiding
+    // MemoryStore in production when Redis is not configured.
+    if (!req.session) {
+      req.session = {
+        destroy: (cb) => cb?.(),
+      };
+    }
+    next();
+  };
+}
+
 function createSessionMiddleware() {
   const sessionSecret = process.env.SESSION_SECRET || process.env.JWT_SECRET;
   if (!sessionSecret) {
@@ -32,6 +45,12 @@ function createSessionMiddleware() {
       ttl: parseInt(process.env.SESSION_TTL_SECONDS || '86400', 10),
     });
   } else {
+    const isProduction = String(process.env.NODE_ENV || 'development').toLowerCase() === 'production';
+    if (isProduction) {
+      console.warn('[session] Redis unavailable - using ephemeral non-persistent session middleware');
+      return createEphemeralSessionMiddleware();
+    }
+
     console.warn('[session] Redis unavailable - using in-memory session store');
   }
 

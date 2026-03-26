@@ -1,7 +1,15 @@
 const { createClient } = require('redis');
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-const REDIS_ENABLED = String(process.env.REDIS_ENABLED || 'true').toLowerCase() !== 'false';
+const NODE_ENV = String(process.env.NODE_ENV || 'development').toLowerCase();
+const redisEnabledRaw = process.env.REDIS_ENABLED;
+const redisEnabledByFlag = redisEnabledRaw === undefined
+  ? null
+  : String(redisEnabledRaw).toLowerCase() !== 'false';
+const isLocalRedisUrl = /127\.0\.0\.1|localhost/i.test(REDIS_URL);
+const REDIS_ENABLED = redisEnabledByFlag === null
+  ? NODE_ENV !== 'production' || !isLocalRedisUrl
+  : redisEnabledByFlag;
 const REDIS_CONNECT_TIMEOUT_MS = parseInt(process.env.REDIS_CONNECT_TIMEOUT_MS || '4000', 10);
 
 let client = null;
@@ -11,6 +19,10 @@ let ready = false;
 
 function createReconnectStrategy() {
   return (retries) => {
+    if (retries >= 5) {
+      return new Error('Redis reconnect retries exceeded');
+    }
+
     // Exponential backoff capped at 5 seconds.
     const delayMs = Math.min(5000, 200 + retries * 200);
     return delayMs;
@@ -62,6 +74,9 @@ async function initRedis() {
     if (client?.isOpen) {
       await client.quit().catch(() => {});
     }
+    if (client?.isOpen || client?.isReady) {
+      await client.disconnect().catch(() => {});
+    }
     client = null;
     ready = false;
     return false;
@@ -93,6 +108,9 @@ async function initRedis() {
     if (subClient?.isOpen) await subClient.quit().catch(() => {});
     if (pubClient?.isOpen) await pubClient.quit().catch(() => {});
     if (client?.isOpen) await client.quit().catch(() => {});
+    if (subClient?.isOpen || subClient?.isReady) await subClient.disconnect().catch(() => {});
+    if (pubClient?.isOpen || pubClient?.isReady) await pubClient.disconnect().catch(() => {});
+    if (client?.isOpen || client?.isReady) await client.disconnect().catch(() => {});
     subClient = null;
     pubClient = null;
     client = null;
