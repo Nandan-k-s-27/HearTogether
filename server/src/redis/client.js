@@ -11,6 +11,8 @@ const REDIS_ENABLED = redisEnabledByFlag === null
   ? NODE_ENV !== 'production' || !isLocalRedisUrl
   : redisEnabledByFlag;
 const REDIS_CONNECT_TIMEOUT_MS = parseInt(process.env.REDIS_CONNECT_TIMEOUT_MS || '4000', 10);
+const REDIS_TLS = String(process.env.REDIS_TLS || '').toLowerCase() === 'true';
+const REDIS_TLS_REJECT_UNAUTHORIZED = String(process.env.REDIS_TLS_REJECT_UNAUTHORIZED || 'true').toLowerCase() !== 'false';
 
 let client = null;
 let pubClient = null;
@@ -44,86 +46,101 @@ function bindClientEvents(redisClient, label) {
   });
 }
 
+function getRedisSocketOptions() {
+  const tlsFromUrl = REDIS_URL.startsWith('rediss://');
+  const useTls = REDIS_TLS || tlsFromUrl;
+
+  const socket = {
+    reconnectStrategy: createReconnectStrategy(),
+  };
+
+  if (useTls) {
+    socket.tls = true;
+    socket.rejectUnauthorized = REDIS_TLS_REJECT_UNAUTHORIZED;
+  }
+
+  return socket;
+}
+
 async function initRedis() {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-  if (!REDIS_ENABLED) {
-    console.warn('[redis] disabled via REDIS_ENABLED=false');
-    return false;
-  }
+    if (!REDIS_ENABLED) {
+      console.warn('[redis] disabled via REDIS_ENABLED=false');
+      return false;
+    }
 
-  if (ready && client && pubClient && subClient) {
+    if (ready && client && pubClient && subClient) {
+      return true;
+    }
+
+    client = createClient({
+      url: REDIS_URL,
+      socket: getRedisSocketOptions(),
+    });
+
+    bindClientEvents(client, 'main');
+
+    try {
+      await Promise.race([
+        client.connect(),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Redis connect timeout')), REDIS_CONNECT_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (err) {
+      console.warn('[redis] main client failed to connect, continuing without Redis', err?.message || err);
+      if (client?.isOpen) {
+        await client.quit().catch(() => {});
+      }
+      if (client?.isOpen || client?.isReady) {
+        await client.disconnect().catch(() => {});
+      }
+      client = null;
+      ready = false;
+      return false;
+    }
+
+    pubClient = client.duplicate();
+    subClient = client.duplicate();
+
+    bindClientEvents(pubClient, 'pub');
+    bindClientEvents(subClient, 'sub');
+
+    try {
+      await Promise.all([
+        Promise.race([
+          pubClient.connect(),
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Redis pub client connect timeout')), REDIS_CONNECT_TIMEOUT_MS);
+          }),
+        ]),
+        Promise.race([
+          subClient.connect(),
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Redis sub client connect timeout')), REDIS_CONNECT_TIMEOUT_MS);
+          }),
+        ]),
+      ]);
+    } catch (err) {
+      console.warn('[redis] pub/sub clients failed to connect, continuing without Redis', err?.message || err);
+      if (subClient?.isOpen) await subClient.quit().catch(() => {});
+      if (pubClient?.isOpen) await pubClient.quit().catch(() => {});
+      if (client?.isOpen) await client.quit().catch(() => {});
+      if (subClient?.isOpen || subClient?.isReady) await subClient.disconnect().catch(() => {});
+      if (pubClient?.isOpen || pubClient?.isReady) await pubClient.disconnect().catch(() => {});
+      if (client?.isOpen || client?.isReady) await client.disconnect().catch(() => {});
+      subClient = null;
+      pubClient = null;
+      client = null;
+      ready = false;
+      return false;
+    }
+
+    ready = true;
+    console.log(`[redis] connected at ${REDIS_URL}`);
     return true;
-  }
-
-  client = createClient({
-    url: REDIS_URL,
-    socket: {
-      reconnectStrategy: createReconnectStrategy(),
-    },
-  });
-
-  bindClientEvents(client, 'main');
-
-  try {
-    await Promise.race([
-      client.connect(),
-      new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Redis connect timeout')), REDIS_CONNECT_TIMEOUT_MS);
-      }),
-    ]);
-  } catch (err) {
-    console.warn('[redis] main client failed to connect, continuing without Redis', err?.message || err);
-    if (client?.isOpen) {
-      await client.quit().catch(() => {});
-    }
-    if (client?.isOpen || client?.isReady) {
-      await client.disconnect().catch(() => {});
-    }
-    client = null;
-    ready = false;
-    return false;
-  }
-
-  pubClient = client.duplicate();
-  subClient = client.duplicate();
-
-  bindClientEvents(pubClient, 'pub');
-  bindClientEvents(subClient, 'sub');
-
-  try {
-    await Promise.all([
-      Promise.race([
-        pubClient.connect(),
-        new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Redis pub client connect timeout')), REDIS_CONNECT_TIMEOUT_MS);
-        }),
-      ]),
-      Promise.race([
-        subClient.connect(),
-        new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Redis sub client connect timeout')), REDIS_CONNECT_TIMEOUT_MS);
-        }),
-      ]),
-    ]);
-  } catch (err) {
-    console.warn('[redis] pub/sub clients failed to connect, continuing without Redis', err?.message || err);
-    if (subClient?.isOpen) await subClient.quit().catch(() => {});
-    if (pubClient?.isOpen) await pubClient.quit().catch(() => {});
-    if (client?.isOpen) await client.quit().catch(() => {});
-    if (subClient?.isOpen || subClient?.isReady) await subClient.disconnect().catch(() => {});
-    if (pubClient?.isOpen || pubClient?.isReady) await pubClient.disconnect().catch(() => {});
-    if (client?.isOpen || client?.isReady) await client.disconnect().catch(() => {});
-    subClient = null;
-    pubClient = null;
-    client = null;
-    ready = false;
-    return false;
-  }
-  ready = true;
-  console.log(`[redis] connected at ${REDIS_URL}`);
-  return true;
   })();
 
   try {
