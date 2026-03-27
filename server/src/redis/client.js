@@ -16,6 +16,7 @@ let client = null;
 let pubClient = null;
 let subClient = null;
 let ready = false;
+let initPromise = null;
 
 function createReconnectStrategy() {
   return (retries) => {
@@ -44,6 +45,9 @@ function bindClientEvents(redisClient, label) {
 }
 
 async function initRedis() {
+  if (initPromise) return initPromise;
+
+  initPromise = (async () => {
   if (!REDIS_ENABLED) {
     console.warn('[redis] disabled via REDIS_ENABLED=false');
     return false;
@@ -120,6 +124,16 @@ async function initRedis() {
   ready = true;
   console.log(`[redis] connected at ${REDIS_URL}`);
   return true;
+  })();
+
+  try {
+    return await initPromise;
+  } finally {
+    // Allow explicit retry after an unsuccessful init.
+    if (!ready) {
+      initPromise = null;
+    }
+  }
 }
 
 function isRedisReady() {
@@ -149,6 +163,7 @@ async function closeRedis() {
 
   await Promise.allSettled(closes);
   ready = false;
+  initPromise = null;
 }
 
 module.exports = {

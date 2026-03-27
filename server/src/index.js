@@ -44,6 +44,13 @@ const {
   getRecentSignals,
 } = require('./redis/realtime');
 
+// Initialize Redis immediately so session middleware can bind to RedisStore
+// when REDIS_URL/REDIS_ENABLED are configured in deployment.
+const redisInitPromise = initRedis().catch((err) => {
+  console.warn('[redis] startup initialization failed, continuing without Redis', err?.message || err);
+  return false;
+});
+
 const app = express();
 const server = http.createServer(app);
 
@@ -787,7 +794,7 @@ const PORT = process.env.PORT || 3001;
 
 async function initializeRedisFeatures() {
   try {
-    await initRedis();
+    await redisInitPromise;
 
     if (!isRedisReady()) return;
 
