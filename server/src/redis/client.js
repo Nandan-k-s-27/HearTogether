@@ -6,12 +6,23 @@ const redisEnabledRaw = process.env.REDIS_ENABLED;
 const redisEnabledByFlag = redisEnabledRaw === undefined
   ? null
   : String(redisEnabledRaw).toLowerCase() !== 'false';
-const isLocalRedisUrl = /127\.0\.0\.1|localhost/i.test(REDIS_URL);
+const REDIS_URL_OBJ = (() => {
+  try {
+    return new URL(REDIS_URL);
+  } catch {
+    return null;
+  }
+})();
+const REDIS_HOSTNAME = String(REDIS_URL_OBJ?.hostname || '').toLowerCase();
+const isLocalRedisUrl = REDIS_HOSTNAME === '127.0.0.1' || REDIS_HOSTNAME === 'localhost';
 const REDIS_ENABLED = redisEnabledByFlag === null
   ? NODE_ENV !== 'production' || !isLocalRedisUrl
   : redisEnabledByFlag;
 const REDIS_CONNECT_TIMEOUT_MS = parseInt(process.env.REDIS_CONNECT_TIMEOUT_MS || '4000', 10);
-const REDIS_TLS = String(process.env.REDIS_TLS || '').toLowerCase() === 'true';
+const redisTlsRaw = process.env.REDIS_TLS;
+const REDIS_TLS = redisTlsRaw === undefined
+  ? null
+  : String(redisTlsRaw).toLowerCase() === 'true';
 const REDIS_TLS_REJECT_UNAUTHORIZED = String(process.env.REDIS_TLS_REJECT_UNAUTHORIZED || 'true').toLowerCase() !== 'false';
 
 let client = null;
@@ -48,7 +59,8 @@ function bindClientEvents(redisClient, label) {
 
 function getRedisSocketOptions() {
   const tlsFromUrl = REDIS_URL.startsWith('rediss://');
-  const useTls = REDIS_TLS || tlsFromUrl;
+  const tlsByDefault = tlsFromUrl || (NODE_ENV === 'production' && !isLocalRedisUrl);
+  const useTls = REDIS_TLS === null ? tlsByDefault : REDIS_TLS;
 
   const socket = {
     reconnectStrategy: createReconnectStrategy(),
@@ -171,6 +183,10 @@ function getRedisSubscriber() {
   return subClient;
 }
 
+function isRedisConfigured() {
+  return REDIS_ENABLED;
+}
+
 async function closeRedis() {
   const closes = [];
 
@@ -187,6 +203,7 @@ module.exports = {
   initRedis,
   closeRedis,
   isRedisReady,
+  isRedisConfigured,
   getRedisClient,
   getRedisPublisher,
   getRedisSubscriber,

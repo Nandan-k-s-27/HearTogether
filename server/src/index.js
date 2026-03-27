@@ -29,6 +29,7 @@ const {
   initRedis,
   closeRedis,
   isRedisReady,
+  isRedisConfigured,
   getRedisPublisher,
   getRedisSubscriber,
 } = require('./redis/client');
@@ -826,7 +827,10 @@ async function bootstrap() {
       if (hasTurn) console.log(`[TURN] provider: ${TURN_PROVIDER} OK`);
       else console.log('[TURN] WARNING: no relay configured - mobile audio will fail');
       console.log(`[lifecycle] max ${MAX_LISTENERS_PER_ROOM} listeners/room, ${MAX_TTL_MS / 1000 / 60} min inactivity TTL`);
-      console.log(`[redis] status: ${isRedisReady() ? 'connected' : 'disabled/unavailable'}`);
+      const redisStatus = isRedisReady()
+        ? 'connected'
+        : (isRedisConfigured() ? 'initializing/unavailable' : 'disabled');
+      console.log(`[redis] status: ${redisStatus}`);
     });
 
     // Keep startup fast on platforms that expect an open port quickly (e.g. Render).
