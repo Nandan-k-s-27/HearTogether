@@ -3,6 +3,10 @@
 HearTogether is a production-ready, real-time web audio streaming application. One authenticated user (host) captures and broadcast system audio or microphone input to multiple listeners who join via room code or QR code. All audio transmission happens peer-to-peer over WebRTC with Socket.IO signaling, optimized for low-latency, low-bandwidth scenarios including mobile networks.
 
 **Live demo**: https://hear-together-ten.vercel.app (frontend) + https://heartogether.onrender.com (backend)
+## Screen Shots
+<img width="1920" height="1080" alt="Screenshot (391)" src="https://github.com/user-attachments/assets/a5a1c511-300c-4aca-93c1-1f2365dd3e20" />
+<img width="1920" height="1080" alt="Screenshot (390)" src="https://github.com/user-attachments/assets/839bbc54-8129-43e2-b43a-92b769c73c56" />
+<img width="1920" height="1080" alt="Screenshot (392)" src="https://github.com/user-attachments/assets/84e7a84a-d15b-4e0d-b573-9a124c65eda3" />
 
 ## Core Features
 
@@ -1094,8 +1098,3 @@ MIT License — See LICENSE file
 - **Issues**: [GitHub Issues](https://github.com/Nandan-k-s-27/HearTogether/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/Nandan-k-s-27/HearTogether/discussions)
 - **Demo**: https://hear-together-ten.vercel.app
-
-## Screen Shots
-
-<!-- Add screenshots below. Place image files in the repository root and reference them here (no extra folder needed). Example: ![Screenshot 1](screenshot-1.png) -->
-
