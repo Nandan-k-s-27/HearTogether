@@ -4,19 +4,21 @@ HearTogether is a real-time web audio sharing app. One user hosts audio, listene
 
 ## Current Highlights
 
-- Google Sign-In authentication for room actions (create/join listening session).
-- Public landing and room preview pages; sign-in is requested only on action.
-- Post-login deep-link resume: listeners return directly to their intended room after OAuth.
-- Host dashboard with pause/resume/stop, per-listener remove, and listener identity (email-based).
-- **Listener engagement**: Simple emoji reactions + text chat (up to 500 chars per message) enable real-time interaction with the host.
-- System audio capture (tab/window/screen) and microphone capture options.
-- Stable account controls: signed-in users always see account identity and direct Switch/Logout actions.
-- Hardened backend with CORS allowlist, helmet headers, rate limiting, and stale-room cleanup.
-- **Scalability**: Configurable listener limit (default 30; realistic for Render free tier) prevents WebRTC degradation.
-- **Realtime resilience**: Listener dedupe on reconnect avoids duplicate participants in host view.
-- **Accurate dynamic counts**: Server emits `room:listener-count` updates on join/leave/remove, and listeners update count live.
-- **Host reconciliation fallback**: Host periodically reconciles listener list against server canonical state to heal missed/out-of-order events.
-- **Low-network tuning**: WebRTC transport includes Opus tuning (FEC/DTX/bitrate shaping) and improved socket reconnect behavior.
+- **Production-hardened authentication**: Google Sign-In with timeout-aware warm-up and automatic backend readiness checks before OAuth redirect
+- Public landing and room preview pages; sign-in is requested only on action
+- Post-login deep-link resume: listeners return directly to their intended room after OAuth
+- Host dashboard with pause/resume/stop, per-listener remove, and listener identity (email-based)
+- **Listener engagement**: Simple emoji reactions + text chat (up to 500 chars per message) enable real-time interaction with the host
+- System audio capture (tab/window/screen) and microphone capture options
+- Stable account controls: signed-in users always see account identity and direct Switch/Logout actions
+- **Hardened backend**: CORS allowlist, helmet headers, rate limiting, stale-room cleanup, and production-safe session handling
+- **Redis integration**: Managed Redis support with automatic TLS detection, session storage, pub/sub, and cache-aside patterns
+- **Scalability**: Configurable listener limit (default 30; realistic for Render free tier) prevents WebRTC degradation
+- **Realtime resilience**: Listener dedupe on reconnect avoids duplicate participants in host view
+- **Accurate dynamic counts**: Server emits `room:listener-count` updates on join/leave/remove, and listeners update count live
+- **Host reconciliation fallback**: Host periodically reconciles listener list against server canonical state to heal missed/out-of-order events
+- **Low-network tuning**: WebRTC transport includes Opus tuning (FEC/DTX/bitrate shaping), ICE candidate pre-gathering, and improved socket reconnect behavior
+- **Mobile-optimized**: Orientation lock, screen WakeLock API, and cross-browser compatibility for mobile audio streams
 
 ## Tech Stack
 
@@ -49,7 +51,7 @@ HearTogether is a real-time web audio sharing app. One user hosts audio, listene
 
 ### Redis setup
 
-Local development:
+**Local development:**
 
 ```bash
 # macOS (homebrew)
@@ -64,11 +66,46 @@ sudo systemctl start redis
 docker run -d --name heartogether-redis -p 6379:6379 redis:7
 ```
 
-Production-like setup:
+**Production (Managed Redis):**
 
-- Use managed Redis (Redis Cloud, AWS ElastiCache, Azure Cache for Redis, Upstash)
+The app supports managed Redis providers with automatic TLS detection:
+
+- **Upstash, Redis Cloud, AWS ElastiCache, Azure Cache for Redis**
+- Auto-detects TLS from `rediss://` URL scheme
+- Falls back to TLS for non-local production endpoints
+- Gracefully disables when Redis is unavailable (in-memory fallback for dev/testing)
+
+**Configuration:**
+
+```env
+# Enable Redis
+REDIS_ENABLED=true
+
+# Connection string (auto-detects TLS for rediss://...)
+REDIS_URL=rediss://<user>:<password>@<host>:<port>
+
+# Optional TLS override
+REDIS_TLS=true                          # force TLS on/off (auto-detect if not set)
+REDIS_TLS_REJECT_UNAUTHORIZED=true      # set false only if cert-chain issues occur
+
+# Connection timing
+REDIS_CONNECT_TIMEOUT_MS=4000           # per-connection timeout (default 4s)
+```
+
+**Initialization behavior:**
+
+- Redis init starts **immediately during server boot** (before HTTP port binding completes)
+- Early initialization allows session middleware to bind to Redis store when configured
+- HTTP port opens immediately regardless of Redis status (fast startup on Render, etc.)
+- Background features (pub/sub, adapter) run after HTTP binding
+- If Redis unavailable: app continues with in-memory/ephemeral fallback
+
+**Network access:**
+
+- Use managed Redis (Redis Cloud, Upstash, AWS ElastiCache)
 - Enable authentication and TLS where supported
 - Restrict network access to backend service only
+- Use `rediss://` URLs (TLS-protected) for production
 
 ## Project Structure
 
@@ -120,47 +157,72 @@ npm install
 
 ### 2) Environment variables
 
-Server (`server/.env`):
+**Backend (`server/.env`):**
 
 ```env
-PORT=3001
+# Server configuration
+NODE_ENV=development                    # or production
+PORT=5000
 FRONTEND_URL=http://localhost:5173
 
+# Google OAuth 2.0
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_CALLBACK_URL=http://localhost:3001/auth/google/callback
+GOOGLE_CALLBACK_URL=http://localhost:5000/auth/google/callback
 
-JWT_SECRET=replace_with_a_long_random_secret
+# Authentication
+JWT_SECRET=replace_with_a_long_random_secret (minimum 32 characters)
+AUTH_WARM_UP_TIMEOUT_MS=150000          # 2.5 min timeout for backend readiness probe
+AUTH_COOKIE_TIMEOUT=86400               # 24 hours
 
-# Room lifecycle (optional)
-# MAX_LISTENERS=30 (default: max concurrent listeners per room; realistic for Render free tier)
-# ROOM_TTL_MS=3600000 (default: 60 min; rooms auto-expire after this inactivity period)
+# Redis configuration
+REDIS_ENABLED=false                     # set to true in production with managed Redis
+REDIS_URL=redis://localhost:6379        # or rediss://user:pass@host:port for TLS
+REDIS_CONNECT_TIMEOUT_MS=4000           # per-connection timeout
+REDIS_TLS=                              # auto-detect if unset; set true/false to override
+REDIS_TLS_REJECT_UNAUTHORIZED=true      # false only for self-signed certs
 
-# Optional TURN relay (recommended: ExpressTurn)
-# TURN_PROVIDER=ExpressTurn
-# EXPRESSTURN_URLS=turn:your-relay:3478,turn:your-relay:3478?transport=tcp,turns:your-relay:5349
-# EXPRESSTURN_USERNAME=your_username
-# EXPRESSTURN_CREDENTIAL=your_credential
-# (Legacy names also supported: TURN_URLS, TURN_USERNAME, TURN_CREDENTIAL)
+# Session store (used when Redis enabled)
+SESSION_SECRET=replace_with_a_long_random_secret
+SESSION_COOKIE_SECURE=false             # set true in production with HTTPS
+SESSION_TTL_SECONDS=86400               # 24 hours
+SESSION_COOKIE_NAME=heartogether.sid
 
-# Redis
-# REDIS_ENABLED=true
-# REDIS_URL=redis://127.0.0.1:6379
-# SESSION_SECRET=replace_with_a_long_random_secret
-# SESSION_COOKIE_SECURE=false
-# SESSION_TTL_SECONDS=86400
-# SESSION_TTL_MS=86400000
-# SESSION_KEY_PREFIX=session:
-# SESSION_COOKIE_NAME=heartogether.sid
+# Room lifecycle configuration
+MAX_LISTENERS=30                        # max concurrent listeners per room (realistic for Render free tier)
+ROOM_TTL_MS=3600000                     # 60 min; rooms auto-expire after inactivity
+
+# TURN relay (optional; recommended for mobile)
+TURN_PROVIDER=ExpressTurn               # or leave empty to use default ICE candidates
+EXPRESSTURN_URLS=turn:relay:3478,turn:relay:3478?transport=tcp,turns:relay:5349
+EXPRESSTURN_USERNAME=your_username
+EXPRESSTURN_CREDENTIAL=your_credential
+
+# Rate limiting
+RATE_LIMIT_REQUESTS=30                  # room creation limit
+RATE_LIMIT_WINDOW_MS=600000             # 10 minutes
+RATE_LIMIT_LOOKUP_REQUESTS=120          # room lookup limit
+RATE_LIMIT_LOOKUP_WINDOW_MS=300000      # 5 minutes
 ```
 
-Client (`client/.env`):
+**Frontend (`client/.env`):**
 
 ```env
-VITE_BACKEND_URL=http://localhost:3001
-# Optional: set to true/1 to keep verbose WebRTC debug logs in production
-# VITE_ENABLE_DEBUG_LOGS=true
+VITE_BACKEND_URL=http://localhost:5000  # or your production backend URL
+VITE_GOOGLE_CLIENT_ID=your_google_client_id
+VITE_ENABLE_DEBUG_LOGS=false            # set to true for verbose WebRTC debug logs
 ```
+
+**Render deployment:**
+
+Set environment variables in the Render dashboard:
+1. Copy all values from `server/.env`
+2. For production: set `REDIS_ENABLED=true` and provide `REDIS_URL=rediss://...` (managed Redis)
+3. Update `FRONTEND_URL` to your Vercel frontend URL (e.g., `https://hear-together-ten.vercel.app`)
+4. Update `GOOGLE_CALLBACK_URL` to your production backend (e.g., `https://heartogether.onrender.com/auth/google/callback`)
+5. Use strong `JWT_SECRET` (minimum 32 characters; use a random generator)
+6. Set `SESSION_COOKIE_SECURE=true` in production
+7. Ensure TURN server credentials are valid for production load
 
 ### 3) Run
 
@@ -273,12 +335,19 @@ Redis/system:
 - The browser warning about "Self-XSS" in console is expected and unrelated to app security defects.
 - Listener identity shown to the host uses authenticated user email for easier moderation.
 - Listener room currently focuses on connection/reaction/chat state and does not include direct audio playback controls.
+- **Service worker optimization**: The app includes a minimal service worker with no-op fetch handler (preserves boot performance). Custom caching strategies can be added as needed.
+- **Startup sequence**: Backend HTTP port opens immediately on deploy (fast health checks); Redis initialization runs asynchronously in background to avoid startup delays on platforms like Render.
+- **Redis idempotent initialization**: Multiple simultaneous init calls are coalesced via promise caching to prevent connection race conditions (safe for multi-instance deployments).
+- **OAuth warm-up**: The client probes both `/api/health` and `/auth/status` endpoints in parallel with timeout-bounded retries (6s per probe, 150s total) before redirecting to Google Sign-In. This prevents infinite waits if backend is stalled or unavailable.
+- **Distributed Redis features**: Session store, pub/sub event bus, rate limiting, and realtime state are all optional and degrade gracefully if Redis is unavailable. When Redis is disabled, the app uses ephemeral in-memory fallbacks.
 
 ## Security Notes
 
-- Dependency audits are run for both client and server as part of maintenance.
+- Dependency audits are run for both client and server as part of maintenance; current status is **0 vulnerabilities** (all critical issues resolved).
 - Socket.IO parser is pinned to a patched version via npm overrides.
-- Client currently has a moderate Vite/esbuild advisory that requires a major Vite upgrade to fully remove.
+- Express session store in production uses Redis-backed session storage; in-memory fallback (ephemeral) is used only when Redis is unavailable to avoid MemoryStore memory-leak warnings.
+- **OAuth security**: Auth history is sanitized on app boot to prevent stale OAuth callback params from causing replay attacks via mobile back-button scenarios.
+- Client currently has no blocking vulnerabilities. Vite/esbuild advisories are non-critical for production builds.
 - Mitigation: do not expose the Vite dev server publicly. Keep local development on localhost/private network and deploy only the production build.
 
 ## Operational Safeguards
@@ -395,4 +464,118 @@ Verify it works locally before deploying:
 5. Start streaming and check console logs in both
 
 If it works locally but not on Render/Vercel, it's likely environment (TURN, CORS, deploy).
+
+### OAuth Sign-In Not Redirecting to Google
+
+**Symptom:** "Waking audio engine" overlay appears, then sign-in fails or page redirects to error instead of Google OAuth.
+
+**Root causes and fixes:**
+
+1. **Backend warm-up timeout exceeded**
+   - The app waits up to 2.5 minutes (`AUTH_WARM_UP_TIMEOUT_MS=150000`) for backend to be ready
+   - If backend doesn't respond within this window, sign-in shows error instead of redirecting
+   - Check browser console for: `[AuthContext] Backend health check timeout exceeded` or `Backend auth status not ready`
+
+   **Fix:** 
+   - Verify backend is running: `curl https://your-backend.onrender.com/api/health` should return `200 OK`
+   - On Render free tier, cold start can take 30-60 seconds; be patient
+   - Increase `AUTH_WARM_UP_TIMEOUT_MS` in backend `.env` if needed (but 150s is usually sufficient)
+
+2. **Backend not fully initialized**
+   - The app probes two endpoints: `/api/health` (general readiness) AND `/auth/status` (OAuth readiness)
+   - If either fails, sign-in is blocked
+   - Check browser console: `[AuthContext] Probing /api/health` and `[AuthContext] Probing /auth/status`
+
+   **Fix:**
+   - Backend logs on Render should show: `[express] Server listening on port 5000`
+   - If you see `Error: getaddrinfo ENOTFOUND` or `ECONNREFUSED`, backend isn't bound yet
+   - Wait longer or restart the Render service
+
+3. **CORS or fetch error**
+   - If browser console shows: `[AuthContext] Auth probe failed` with CORS error
+   - Verify `FRONTEND_URL` is correctly set on backend (should match your Vercel domain)
+
+   **Fix:**
+   ```env
+   FRONTEND_URL=https://your-vercel-app.vercel.app
+   ```
+
+### Redis Connection Failures
+
+**Symptoms:**
+- Backend logs show `[redis] connection failed` or `Socket closed unexpectedly`
+- App continues to work but Redis features (session store, rate limiting) disabled
+- Render logs may show `ECONNREFUSED` or `Error: getaddrinfo ENOTFOUND`
+
+**Common issues:**
+
+1. **Redis is disabled or not configured**
+   ```env
+   REDIS_ENABLED=false   # explicitly disabled in dev
+   ```
+   This is intentional and safe for development. In production, set `REDIS_ENABLED=true` and provide `REDIS_URL`.
+
+2. **Wrong connection string**
+   - Verify `REDIS_URL` format:
+     ```
+     redis://localhost:6379                               # local dev
+     rediss://user:password@redis-host.cloud:6379         # managed Redis with TLS
+     ```
+   - Test locally: `redis-cli -u "$REDIS_URL" ping` should return `PONG`
+
+3. **TLS handshake failed** (for managed Redis)
+   - Error in logs: `Socket closed unexpectedly` after repeated retries
+   - Managed Redis (Upstash, Redis Cloud, etc.) requires TLS
+   - Verify app auto-detects TLS correctly:
+     ```env
+     REDIS_URL=rediss://...                 # rediss:// scheme auto-enables TLS
+     REDIS_TLS=true                         # or explicitly set to true
+     ```
+
+   **Fix:**
+   - If using `redis://` URL with managed provider, explicitly enable TLS:
+     ```env
+     REDIS_URL=redis://...
+     REDIS_TLS=true
+     ```
+   - If certificate validation fails:
+     ```env
+     REDIS_TLS_REJECT_UNAUTHORIZED=false    # only if cert-chain issues occur
+     ```
+
+4. **Connection timeout**
+   - Redis takes >4 seconds to connect
+   - Increase timeout in `.env`:
+     ```env
+     REDIS_CONNECT_TIMEOUT_MS=8000          # 8 seconds instead of default 4s
+     ```
+
+5. **Network/firewall blocking Redis port**
+   - Render can't reach your Redis host
+   - Verify:
+     - Redis host is publicly accessible (or in same VPC as Render)
+     - Port is correct (usually 6379 for standard, 6380 for TLS)
+     - IP whitelist includes Render's outbound IPs (if applicable)
+
+   **Temporary workaround:** Run production without Redis by setting `REDIS_ENABLED=false`
+   - This disables distributed features but app still works (in-memory fallback)
+   - Not recommended for multi-instance deployments
+
+### Backend Startup 503 Errors
+
+**Symptom:** Render shows `503 Service Unavailable` for first 30-60 seconds after deploy.
+
+**Root cause:** Render's health check runs immediately but backend is still initializing Redis and loading routes.
+
+**Fixes (already applied in current code):**
+
+1. **Background Redis initialization** (`server/src/index.js`)
+   - HTTP server opens on `PORT` immediately
+   - Redis setup runs asynchronously in background
+   - Health check returns `200 OK` even if Redis not ready yet
+   - This eliminates the startup 503 window
+
+2. **Manual restart if needed**
+   - Go to Render dashboard → your service → Manual Redeploy
+   - Or trigger via GitHub push in case of stuck state
 
