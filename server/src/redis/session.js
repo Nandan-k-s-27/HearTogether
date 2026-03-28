@@ -51,7 +51,7 @@ function createSessionMiddleware() {
       return createEphemeralSessionMiddleware();
     }
 
-    console.warn('[session] Redis unavailable - using in-memory session store');
+    console.warn('[session] Redis unavailable - using in-memory session store (development only)');
   }
 
   return session(sessionOptions);
