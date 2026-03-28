@@ -428,12 +428,12 @@ export default function ListenerRoom() {
 
   return (
     <div
-      className="h-[100dvh] overflow-hidden px-3 py-3 md:px-6 md:py-4"
+      className="h-screen h-[100dvh] box-border overflow-hidden px-3 py-3 md:px-4 md:py-2.5 lg:px-6 lg:py-4"
     >
       <ToastContainer toasts={toast.toasts} onRemove={toast.removeToast} />
       <GlowCard customSize glowColor="blue" className="mx-auto h-full w-full max-w-md text-center">
-        <div className="flex h-full flex-col px-4 py-4 md:px-6 md:py-6">
-          <h1 className="mb-4 text-center text-3xl font-bold md:mb-5 md:text-2xl">HearTogether</h1>
+        <div className="flex h-full flex-col px-4 py-4 md:px-5 md:py-4 lg:px-6 lg:py-6">
+          <h1 className="mb-4 text-center text-3xl font-bold md:mb-4 md:text-2xl lg:mb-5">HearTogether</h1>
 
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
 
@@ -441,7 +441,7 @@ export default function ListenerRoom() {
             instantly so showing a 'Connecting' flash is more confusing than
             helpful; the connState pill below already covers ICE progress). */}
           {status !== 'connecting' && (
-            <div className="mb-6">
+            <div className="mb-5 md:mb-4 lg:mb-6">
               <p className={`text-lg font-semibold ${s.color}`}>{s.label}</p>
               <p className="mt-1 text-sm text-gray-500 font-mono">Room: {roomCode?.toUpperCase()}</p>
               {roomCapacity && (
@@ -450,7 +450,7 @@ export default function ListenerRoom() {
             </div>
           )}
           {status === 'connecting' && (
-            <div className="mb-6">
+            <div className="mb-5 md:mb-4 lg:mb-6">
               {!iceReady ? (
                 <div className="space-y-2">
                   <SkeletonBox height="h-6" width="w-32" />
@@ -464,7 +464,7 @@ export default function ListenerRoom() {
 
           {/* ICE/TURN loading state */}
           {!iceReady && (
-            <div className="mb-4 space-y-2">
+            <div className="mb-4 space-y-2 md:mb-3 lg:mb-4">
               <p className="text-xs uppercase tracking-wider text-gray-400 mb-2">Initializing…</p>
               <SkeletonBox height="h-10" />
             </div>
@@ -472,7 +472,7 @@ export default function ListenerRoom() {
 
           {/* Connection error state */}
           {connError && !isRetrying && (
-            <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3">
+            <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3 md:mb-3 lg:mb-4">
               <div>
                 <p className="text-sm font-semibold text-red-300">⚠️ Connection Issue</p>
                 <p className="text-xs text-red-200 mt-1">{connError}</p>
@@ -487,7 +487,7 @@ export default function ListenerRoom() {
           )}
 
           {joinError && (
-            <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3">
+            <div className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 space-y-3 md:mb-3 lg:mb-4">
               <div>
                 <p className="text-sm font-semibold text-red-300">Room is full</p>
                 <p className="text-xs text-red-200 mt-1">{joinError}</p>
@@ -505,7 +505,7 @@ export default function ListenerRoom() {
 
           {/* WebRTC connection state */}
           {status !== 'ended' && iceReady && (
-            <div className={`mb-4 flex items-center justify-center gap-2 text-xs rounded-lg px-3 py-2 ${connState === 'connected'
+            <div className={`mb-4 flex items-center justify-center gap-2 text-xs rounded-lg px-3 py-2 md:mb-3 lg:mb-4 ${connState === 'connected'
                 ? 'bg-green-900/40 text-green-300'
                 : connState === 'failed'
                   ? 'bg-red-900/40 text-red-300'
@@ -534,7 +534,7 @@ export default function ListenerRoom() {
               onClick={handleStartAudio}
               background="rgba(76, 110, 245, 1)"
               shimmerColor="#ffffff"
-              className="mb-4 w-full py-3 text-base font-semibold dark:text-white md:py-4 md:text-lg"
+              className="mb-4 w-full py-3 text-base font-semibold dark:text-white md:mb-3 md:py-3 md:text-base lg:mb-4 lg:py-4 lg:text-lg"
             >
               Tap to Hear
             </ShimmerButton>
@@ -542,10 +542,10 @@ export default function ListenerRoom() {
 
           {/* Actions */}
           {status !== 'ended' && (
-            <div className="mb-4 rounded-xl border border-white/10 bg-white/5 p-3 md:p-4">
-              <p className="mb-4 text-xs uppercase tracking-wider text-gray-400 md:text-sm">React to host</p>
+            <div className="mb-4 rounded-xl border border-white/10 bg-white/5 p-3 md:mb-3 md:p-3 lg:mb-4 lg:p-4">
+              <p className="mb-3 text-xs uppercase tracking-wider text-gray-400 md:text-sm lg:mb-4">React to host</p>
 
-              <div className="flex flex-wrap items-center justify-center gap-2 md:gap-3">
+              <div className="flex flex-wrap items-center justify-center gap-2 md:gap-2 lg:gap-3">
                 {QUICK_REACTIONS.map((emoji) => (
                   <button
                     key={emoji}
@@ -554,7 +554,7 @@ export default function ListenerRoom() {
                     className={`rounded-lg border transition ${selectedReaction === emoji
                         ? 'border-brand-400 bg-brand-500/20'
                         : 'border-white/10 bg-black/20 hover:bg-white/10'
-                      } px-3 py-1.5 text-lg md:px-4 md:py-3 md:text-2xl`}
+                      } px-3 py-1.5 text-lg md:px-3.5 md:py-2.5 md:text-xl lg:px-4 lg:py-3 lg:text-2xl`}
                     style={{ touchAction: 'manipulation' }}
                     aria-label={`React with ${emoji}`}
                   >
@@ -565,7 +565,7 @@ export default function ListenerRoom() {
                 <button
                   type="button"
                   onClick={() => setShowExtraReactions((v) => !v)}
-                  className="rounded-lg border border-white/10 bg-black/20 px-3 py-1.5 text-sm font-semibold text-gray-200 transition hover:bg-white/10 md:px-4 md:py-3 md:text-lg"
+                  className="rounded-lg border border-white/10 bg-black/20 px-3 py-1.5 text-sm font-semibold text-gray-200 transition hover:bg-white/10 md:px-3.5 md:py-2.5 md:text-base lg:px-4 lg:py-3 lg:text-lg"
                   style={{ touchAction: 'manipulation' }}
                   aria-label="More reactions"
                 >
@@ -574,7 +574,7 @@ export default function ListenerRoom() {
               </div>
 
               {showExtraReactions && (
-                <div className="mt-3 flex flex-wrap items-center justify-center gap-2 border-t border-white/10 pt-3 md:gap-3">
+                <div className="mt-3 flex flex-wrap items-center justify-center gap-2 border-t border-white/10 pt-3 md:gap-2 lg:gap-3">
                   {EXTRA_REACTIONS.map((emoji) => (
                     <button
                       key={emoji}
@@ -583,7 +583,7 @@ export default function ListenerRoom() {
                       className={`rounded-lg border transition ${selectedReaction === emoji
                           ? 'border-brand-400 bg-brand-500/20'
                           : 'border-white/10 bg-black/20 hover:bg-white/10'
-                        } px-3 py-1.5 text-lg md:px-4 md:py-3 md:text-2xl`}
+                        } px-3 py-1.5 text-lg md:px-3.5 md:py-2.5 md:text-xl lg:px-4 lg:py-3 lg:text-2xl`}
                       style={{ touchAction: 'manipulation' }}
                       aria-label={`React with ${emoji}`}
                     >
@@ -595,14 +595,14 @@ export default function ListenerRoom() {
 
               {selectedReaction && (
                 <p className="mt-3 text-xs text-gray-400 md:text-sm">
-                  Your current reaction: <span className="text-base md:text-2xl">{selectedReaction}</span>
+                  Your current reaction: <span className="text-base md:text-xl lg:text-2xl">{selectedReaction}</span>
                 </p>
               )}
             </div>
           )}
 
           {status !== 'ended' && (
-            <div className="mb-4 rounded-xl border border-white/10 bg-white/5 p-3 md:p-4">
+            <div className="mb-4 rounded-xl border border-white/10 bg-white/5 p-3 md:mb-3 md:p-3 lg:mb-4 lg:p-4">
               <button
                 type="button"
                 onClick={() => setShowChat((v) => !v)}
@@ -611,7 +611,7 @@ export default function ListenerRoom() {
                 {showChat ? '▼ Message Host' : '▶ Message Host'}
               </button>
               {showChat && (
-                <div className="mt-3 space-y-2 md:space-y-3">
+                <div className="mt-3 space-y-2 md:space-y-2 lg:space-y-3">
                   <div className="flex flex-col gap-2 md:flex-row">
                     <input
                       type="text"
@@ -619,14 +619,14 @@ export default function ListenerRoom() {
                       onChange={(e) => setChatMessage(e.target.value.slice(0, 50))}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                       placeholder="Say something..."
-                      className="flex-1 rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs text-white placeholder-gray-500 focus:border-brand-400 focus:outline-none md:px-4 md:py-3 md:text-base"
+                      className="flex-1 rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-xs text-white placeholder-gray-500 focus:border-brand-400 focus:outline-none md:px-3.5 md:py-2.5 md:text-sm lg:px-4 lg:py-3 lg:text-base"
                       maxLength="50"
                     />
                     <button
                       type="button"
                       onClick={sendMessage}
                       disabled={!chatMessage.trim()}
-                      className="rounded-lg bg-brand-500/80 px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50 md:px-4 md:py-3 md:text-base"
+                      className="rounded-lg bg-brand-500/80 px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50 md:px-3.5 md:py-2.5 md:text-sm lg:px-4 lg:py-3 lg:text-base"
                     >
                       Send
                     </button>
@@ -638,13 +638,13 @@ export default function ListenerRoom() {
           )}
           </div>
 
-          <div className="shrink-0 pt-2">
+          <div className="shrink-0 pt-1 md:pt-0.5 lg:pt-2">
             {status === 'ended' ? (
               <ShimmerButton
                 onClick={() => navigate('/', { replace: true })}
                 background="rgba(76, 110, 245, 1)"
                 shimmerColor="#ffffff"
-                className="w-full py-3 text-base font-semibold dark:text-white md:py-4 md:text-lg"
+                className="w-full py-3 text-base font-semibold dark:text-white md:py-3 md:text-base lg:py-4 lg:text-lg"
               >
                 Back to Home
               </ShimmerButton>
@@ -653,7 +653,7 @@ export default function ListenerRoom() {
                 onClick={handleLeave}
                 background="rgba(20, 20, 30, 0.95)"
                 shimmerColor="#5c7cfa"
-                className="w-full py-3 text-base font-semibold dark:text-white md:py-4 md:text-lg"
+                className="w-full py-3 text-base font-semibold dark:text-white md:py-3 md:text-base lg:py-4 lg:text-lg"
               >
                 Leave Room
               </ShimmerButton>
