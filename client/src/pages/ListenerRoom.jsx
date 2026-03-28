@@ -431,11 +431,11 @@ export default function ListenerRoom() {
       className="h-screen h-[100dvh] box-border overflow-hidden px-3 py-3 md:px-4 md:py-2.5 lg:px-6 lg:py-4"
     >
       <ToastContainer toasts={toast.toasts} onRemove={toast.removeToast} />
-      <GlowCard customSize glowColor="blue" className="mx-auto h-full w-full max-w-md text-center">
-        <div className="flex h-full flex-col px-4 py-4 md:px-5 md:py-4 lg:px-6 lg:py-6">
+      <GlowCard customSize glowColor="blue" className="mx-auto h-full w-full max-w-md overflow-hidden text-center">
+        <div className="flex h-full flex-col overflow-y-auto px-4 py-4 md:overflow-hidden md:px-5 md:py-4 lg:px-6 lg:py-6">
           <h1 className="mb-4 text-center text-3xl font-bold md:mb-4 md:text-2xl lg:mb-5">HearTogether</h1>
 
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="pr-1 md:min-h-0 md:flex-1 md:overflow-y-auto">
 
           {/* Status — hidden while the socket is still joining (connects near-
             instantly so showing a 'Connecting' flash is more confusing than
@@ -638,13 +638,13 @@ export default function ListenerRoom() {
           )}
           </div>
 
-          <div className="shrink-0 pt-1 md:pt-0.5 lg:pt-2">
+          <div className="shrink-0 pt-1 md:pt-1 lg:pt-2">
             {status === 'ended' ? (
               <ShimmerButton
                 onClick={() => navigate('/', { replace: true })}
                 background="rgba(76, 110, 245, 1)"
                 shimmerColor="#ffffff"
-                className="w-full py-3 text-base font-semibold dark:text-white md:py-3 md:text-base lg:py-4 lg:text-lg"
+                className="w-full py-3 text-base font-semibold dark:text-white md:py-2.5 md:text-base lg:py-4 lg:text-lg"
               >
                 Back to Home
               </ShimmerButton>
@@ -653,7 +653,7 @@ export default function ListenerRoom() {
                 onClick={handleLeave}
                 background="rgba(20, 20, 30, 0.95)"
                 shimmerColor="#5c7cfa"
-                className="w-full py-3 text-base font-semibold dark:text-white md:py-3 md:text-base lg:py-4 lg:text-lg"
+                className="w-full py-3 text-base font-semibold dark:text-white md:py-2.5 md:text-base lg:py-4 lg:text-lg"
               >
                 Leave Room
               </ShimmerButton>
