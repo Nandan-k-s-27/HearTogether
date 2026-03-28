@@ -1095,3 +1095,7 @@ MIT License — See LICENSE file
 - **Discussions**: [GitHub Discussions](https://github.com/Nandan-k-s-27/HearTogether/discussions)
 - **Demo**: https://hear-together-ten.vercel.app
 
+## Screen Shots
+
+<!-- Add screenshots below. Place image files in the repository root and reference them here (no extra folder needed). Example: ![Screenshot 1](screenshot-1.png) -->
+
