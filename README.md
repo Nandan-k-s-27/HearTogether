@@ -4,9 +4,11 @@ HearTogether is a production-ready, real-time web audio streaming application. O
 
 **Live demo**: https://hear-together-ten.vercel.app (frontend) + https://heartogether.onrender.com (backend)
 ## Screen Shots
-<img width="1920" height="1080" alt="Screenshot (391)" src="https://github.com/user-attachments/assets/a5a1c511-300c-4aca-93c1-1f2365dd3e20" />
-<img width="1920" height="1080" alt="Screenshot (390)" src="https://github.com/user-attachments/assets/839bbc54-8129-43e2-b43a-92b769c73c56" />
-<img width="1920" height="1080" alt="Screenshot (392)" src="https://github.com/user-attachments/assets/84e7a84a-d15b-4e0d-b573-9a124c65eda3" />
+<img width="1920" height="1080" alt="Landing Page with light theme" src="https://github.com/user-attachments/assets/a5a1c511-300c-4aca-93c1-1f2365dd3e20" />
+<img width="1920" height="1080" alt="Landing page" src="https://github.com/user-attachments/assets/839bbc54-8129-43e2-b43a-92b769c73c56" />
+<img width="1920" height="1080" alt="Host room" src="https://github.com/user-attachments/assets/84e7a84a-d15b-4e0d-b573-9a124c65eda3" />
+<img width="1920" height="1080" alt="Listners room" src="https://github.com/user-attachments/assets/ec411449-4b43-4993-853e-53f7bdb355f7" />
+
 
 ## Core Features
 
